@@ -101,17 +101,33 @@ logger.addHandler(telegram_handler)
 configured_groups_cache = []
 
 # Глобальные переменные для кэширования пользователей
-legitimate_users_cache = set()
 suspicious_users_cache = set()
 spammers_cache = set()
 
+def display_user(user):
+    # Отображение информации о пользователе в виде строки
+    result = f"#{user.id} {user.first_name or ''} {user.last_name or ''}".strip()
+    if user.username:
+        result = f"{result} (@{user.username})".strip()
+    return result
+
+def display_chat(chat):
+    # Отображение информации о чате в виде строки
+    result = f"#{chat.id} {chat.title or ''}".strip()
+    if chat.username:
+        result = f"{result} (@{chat.username})".strip()
+    return result
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     # Обработка команды /start
-    logger.debug(f"Handling /start command from {update.message.chat_id}")
+    logger.debug(
+        f"Handling /start command from user {display_user(update.message.from_user)} in chat {display_chat(update.message.chat)}"
+    )
     if update.message.chat_id > 0:
         await update.message.reply_text("This bot is for group use only.")
-        logger.debug(f"Private message /start received from {update.message.chat_id}")
+        logger.debug(
+            f"Private message /start received from user {display_user(update.message.from_user)} in chat {display_chat(update.message.chat)}"
+        )
     else:
         chat_id = update.message.chat_id
         user_id = update.message.from_user.id
@@ -133,14 +149,14 @@ async def start_command(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(
                 "I need to be an administrator in this group to be configured."
             )
-            logger.debug(f"Bot is not an admin in group {chat_id}.")
+            logger.debug(f"Bot is not an admin in group {chat_id} ({update.message.chat.title}). User {user_id} ({update.message.from_user.username}) tried to configure the bot.")
         elif chat_member_status not in ["administrator", "creator"]:
             # Проверка на то, что вызвавший команду пользователь является администратором
             await update.message.reply_text(
                 "Only administrators can configure the bot."
             )
             logger.debug(
-                f"Non-admin user {user_id} tried to configure the bot in group {chat_id}."
+                f"Non-admin user {display_user(update.message.from_user)} tried to configure the bot in group {display_chat(update.message.chat)}."
             )
 
         elif is_group_configured(chat_id):
@@ -152,7 +168,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
             await context.bot.delete_message(
                 chat_id=chat_id, message_id=update.message.message_id
             )
-            logger.debug(f"Group {chat_id} is already configured.")
+            logger.debug(f"User {display_user(update.message.from_user)} attempted to configure group {display_chat(update.message.chat)}, but it is already configured.")
         else:
             # Настройка бота для группы
             try:
@@ -163,7 +179,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
                         "INSERT INTO `groups` (group_id) VALUES (%s)", (chat_id,)
                     )
                 except mysql.connector.IntegrityError:
-                    logger.debug(f"Group {chat_id} already exists in groups table.")
+                    logger.debug(f"Group {chat_id} ({update.message.chat.title}) already exists in groups table, attempted by user {user_id} ({update.message.from_user.username}).")
                 try:
                     cursor.execute(
                         "INSERT INTO `group_settings` (group_id, parameter, value) VALUES (%s, %s, %s)",
@@ -171,7 +187,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
                     )
                 except mysql.connector.IntegrityError:
                     logger.debug(
-                        f"Instructions for group {chat_id} already exist in group_settings table."
+                        f"Instructions for group {display_chat(update.message.chat)} already exist in group_settings table, attempted by user {display_user(update.message.from_user)}."
                     )
                 conn.commit()
                 cursor.close()
@@ -189,9 +205,9 @@ async def start_command(update: Update, context: CallbackContext) -> None:
                 await context.bot.delete_message(
                     chat_id=chat_id, message_id=update.message.message_id
                 )
-                logger.info(f"Group {chat_id} has been configured.")
+                logger.info(f"Group {display_chat(update.message.chat)} has been configured by user {display_user(update.message.from_user)}.")
             except mysql.connector.Error as err:
-                logger.error(f"Database error while configuring group {chat_id}: {err}")
+                logger.error(f"Database error while configuring group {display_chat(update.message.chat)} by user {display_user(update.message.from_user)}: {err}")
                 await context.bot.send_message(
                     chat_id=chat_id, text="Error configuring bot for this group."
                 )
@@ -203,7 +219,9 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     # Обработка команды /help
-    logger.debug(f"Handling /help command from {update.message.chat_id}")
+    logger.debug(
+        f"Handling /help command from user {display_user(update.message.from_user)} in chat {display_chat(update.message.chat)}"
+    )
     if update.message.chat_id > 0:
         # Отправка сообщения о том, что бот работает только в группах
         await context.bot.send_message(
@@ -213,7 +231,9 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         await context.bot.delete_message(
             chat_id=chat_id, message_id=update.message.message_id
         )
-        logger.debug(f"Private message /help received from {update.message.chat_id}")
+        logger.debug(
+            f"Private message /help received from user {display_user(update.message.from_user)}"
+        )
     else:
         # Отправка сообщения со списком доступных команд
         chat_id = update.message.chat_id
@@ -232,7 +252,7 @@ async def help_command(update: Update, context: CallbackContext) -> None:
             await context.bot.delete_message(
                 chat_id=chat_id, message_id=update.message.message_id
             )
-            logger.debug(f"Help command received from configured group {chat_id}")
+            logger.debug(f"Help command received from configured group {display_chat(update.message.chat)} by user {display_user(update.message.from_user)}")
         else:
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -241,15 +261,21 @@ async def help_command(update: Update, context: CallbackContext) -> None:
             await context.bot.delete_message(
                 chat_id=chat_id, message_id=update.message.message_id
             )
-            logger.debug(f"Help command received from unconfigured group {chat_id}")
+            logger.debug(
+                f"Help command received from unconfigured group {display_chat(update.message.chat)} by user {display_user(update.message.from_user)}"
+            )
 
 
 async def set_command(update: Update, context: CallbackContext) -> None:
     # Обработка команды /set
-    logger.debug(f"Handling /set command from {update.message.chat_id}")
+    logger.debug(
+        f"Handling /set command from user {display_user(update.message.from_user)} in chat {display_chat(update.message.chat)}"
+    )
     if update.message.chat_id > 0:
         await update.message.reply_text("This bot is for group use only.")
-        logger.debug(f"Private message /set received from {update.message.chat_id}")
+        logger.debug(
+            f"Private message /set received from user {display_user(update.message.from_user)}"
+        )
     else:
         chat_id = update.message.chat_id
         user_id = update.message.from_user.id
@@ -260,13 +286,13 @@ async def set_command(update: Update, context: CallbackContext) -> None:
                 "Only administrators can configure the bot."
             )
             logger.debug(
-                f"Non-admin user {user_id} tried to configure the bot in group {chat_id}."
+                f"Non-admin user {display_user(update.message.from_user)} tried to configure the bot in group {display_chat(update.message.chat)}."
             )
         elif not is_group_configured(chat_id):
             await update.message.reply_text(
                 "I am not set up correctly to work in this group. Use /start to configure me."
             )
-            logger.debug(f"Group {chat_id} is not configured.")
+            logger.debug(f"User {display_user(update.message.from_user)} tried to set a parameter, but group {display_chat(update.message.chat)} is not configured.")
         else:
             if len(context.args) < 2:
                 await context.bot.send_message(
@@ -276,7 +302,7 @@ async def set_command(update: Update, context: CallbackContext) -> None:
                     chat_id=chat_id, message_id=update.message.message_id
                 )
                 logger.debug(
-                    f"Invalid /set command usage by {user_id} in group {chat_id}"
+                    f"Invalid /set command usage by user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}. Expected format: /set <parameter> <value>"
                 )
                 return
 
@@ -292,7 +318,7 @@ async def set_command(update: Update, context: CallbackContext) -> None:
                     chat_id=chat_id, message_id=update.message.message_id
                 )
                 logger.debug(
-                    f"Invalid parameter {parameter} used by {user_id} in group {chat_id}"
+                    f"User {display_user(update.message.from_user)} in group {display_chat(update.message.chat)} attempted to set an invalid parameter: {parameter}"
                 )
                 return
 
@@ -307,7 +333,7 @@ async def set_command(update: Update, context: CallbackContext) -> None:
                     chat_id=chat_id, message_id=update.message.message_id
                 )
                 logger.debug(
-                    f"Value for {parameter} exceeds length limit by {user_id} in group {chat_id}"
+                    f"User {display_user(update.message.from_user)} in group {display_chat(update.message.chat)} attempted to set {parameter} to a value exceeding the length limit of {instructions_length_limit} characters."
                 )
                 return
 
@@ -344,10 +370,10 @@ async def set_command(update: Update, context: CallbackContext) -> None:
                 await context.bot.delete_message(
                     chat_id=chat_id, message_id=update.message.message_id
                 )
-                logger.info(f"Set {parameter} to {value} in group {chat_id}")
+                logger.info(f"User {display_user(update.message.from_user)} set parameter '{parameter}' to '{value}' in group {display_chat(update.message.chat)}")
             except mysql.connector.Error as err:
                 logger.error(
-                    f"Database error while setting parameter {parameter} in group {chat_id}: {err}"
+                    f"Database error while setting parameter '{parameter}' to '{value}' in group {display_chat(update.message.chat)} by user {display_user(update.message.from_user)}: {err}"
                 )
                 await context.bot.send_message(
                     chat_id=chat_id, text="Error setting parameter."
@@ -360,15 +386,15 @@ async def set_command(update: Update, context: CallbackContext) -> None:
 
 async def get_command(update: Update, context: CallbackContext) -> None:
     # Обработка команды /get
-    logger.debug(f"Handling /get command from {update.message.chat_id}")
     if update.message.chat_id > 0:
         await update.message.reply_text("This bot is for group use only.")
-        logger.debug(f"Private message /get received from {update.message.chat_id}")
+        logger.debug(
+            f"Private message /get received from user {display_user(update.message.from_user)}"
+        )
     else:
         chat_id = update.message.chat_id
         user_id = update.message.from_user.id
         chat_member = await context.bot.get_chat_member(chat_id, user_id)
-
         if chat_member.status not in ["administrator", "creator"]:
             await context.bot.send_message(
                 chat_id=chat_id, text="Only administrators can configure the bot."
@@ -377,7 +403,7 @@ async def get_command(update: Update, context: CallbackContext) -> None:
                 chat_id=chat_id, message_id=update.message.message_id
             )
             logger.debug(
-                f"Non-admin user {user_id} tried to read bot settings in group {chat_id}."
+                f"Non-admin user {display_user(update.message.from_user)} tried to read bot settings in group {display_chat(update.message.chat)}."
             )
         elif not is_group_configured(chat_id):
             await context.bot.send_message(
@@ -387,7 +413,9 @@ async def get_command(update: Update, context: CallbackContext) -> None:
             await context.bot.delete_message(
                 chat_id=chat_id, message_id=update.message.message_id
             )
-            logger.debug(f"Group {chat_id} is not configured.")
+            logger.debug(
+                f"Group {display_chat(update.message.chat)} is not configured. User {display_user(update.message.from_user)} tried to get parameter {context.args[0]}."
+            )
         else:
             if len(context.args) != 1:
                 await context.bot.send_message(
@@ -397,7 +425,7 @@ async def get_command(update: Update, context: CallbackContext) -> None:
                     chat_id=chat_id, message_id=update.message.message_id
                 )
                 logger.debug(
-                    f"Invalid /get command usage by {user_id} in group {chat_id}"
+                    f"Invalid /get command usage by user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}. Expected format: /get <parameter>"
                 )
                 return
 
@@ -420,7 +448,7 @@ async def get_command(update: Update, context: CallbackContext) -> None:
                     chat_id=chat_id, message_id=update.message.message_id
                 )
                 logger.debug(
-                    f"Retrieved {parameter} for group {chat_id} from cache: {value}"
+                    f"Retrieved parameter '{parameter}' with value '{value}' for group {display_chat(update.message.chat)} from cache, requested by user {display_user(update.message.from_user)}"
                 )
             else:
                 await context.bot.send_message(
@@ -430,13 +458,13 @@ async def get_command(update: Update, context: CallbackContext) -> None:
                     chat_id=chat_id, message_id=update.message.message_id
                 )
                 logger.debug(
-                    f"Parameter {parameter} not found for group {chat_id} in cache"
+                    f"Parameter '{parameter}' not found for group {display_chat(update.message.chat)} in cache, requested by user {display_user(update.message.from_user)}"
                 )
 
 
 def check_and_create_tables():
     # Проверка и создание таблиц MySQL
-    logger.debug("Checking and creating tables if necessary.")
+    logger.debug("Checking and creating necessary tables in the database for group and user settings.")
     try:
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
@@ -474,15 +502,15 @@ def check_and_create_tables():
         conn.commit()
         cursor.close()
         conn.close()
-        logger.debug("Tables checked and created if necessary.")
+        logger.debug("Checked and created necessary tables in the database for group and user settings if they did not already exist.")
     except mysql.connector.Error as err:
-        logger.critical(f"Database error: {err}. Terminating app.")
+        logger.critical(f"Database error while checking and creating tables: {err}. Terminating application.")
         raise SystemExit("Database error.")
 
 
 def load_configured_groups():
     # Загрузка списка настроенных групп и их параметров из базы данных
-    logger.debug("Loading configured groups and their parameters from the database.")
+    logger.debug("Loading configured groups and their parameters from the database, including group IDs and their respective settings.")
     global configured_groups_cache
     configured_groups_cache = []
     try:
@@ -510,19 +538,17 @@ def load_configured_groups():
         cursor.close()
         conn.close()
 
-        logger.debug(f"Configured groups loaded ({len(configured_groups_cache)})")
+        logger.debug(f"Loaded {len(configured_groups_cache)} configured groups from the database.")
     except mysql.connector.Error as err:
-        logger.critical(f"Database error: {err}. Terminating app.")
+        logger.critical(f"Database error while loading configured groups and their parameters: {err}. Terminating application.")
         raise SystemExit("Database error.")
 
 
 def is_group_configured(group_id):
     # Проверка наличия группы в кэше настроенных групп
-    logger.debug(f"Checking if group {group_id} is configured.")
-    is_configured = any(
-        group["group_id"] == group_id for group in configured_groups_cache
-    )
-    logger.debug(f"Group {group_id} configured: {is_configured}")
+    group = next((group for group in configured_groups_cache if group["group_id"] == group_id), None)
+    group_name = group['settings'].get('group_name', 'Unknown Group') if group else 'Unknown Group'
+    is_configured = group is not None
     return is_configured
 
 
@@ -530,20 +556,24 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     if update.message:
         chat_id = update.message.chat_id
     else:
-        logger.error("Received update without message: %s", update)
+        logger.debug("Received update without message")
         return
     user_id = update.message.from_user.id
-    logger.debug(f"Handling message from chat {chat_id}")
+    logger.debug(
+        f"Handling message from user {display_user(update.message.from_user)} in chat {display_chat(update.message.chat)} with text: {update.message.text}"
+    )
 
     if chat_id > 0:
         await update.message.reply_text("This bot is for group use only.")
-        logger.debug(f"Private message {update.message.text} received from {chat_id}")
+        logger.debug(
+            f"Private message received from user {display_user(update.message.from_user)}"
+        )
     elif is_group_configured(chat_id):
         if user_id in spammers_cache:
             await context.bot.kick_chat_member(chat_id, user_id)
             await update.message.delete()
             logger.info(
-                f"Banned spammer {user_id} from group {chat_id} and deleted their message"
+                f"Banned spammer {display_user(update.message.from_user)} from group {display_chat(update.message.chat)} and deleted their message: {update.message.text}"
             )
             return
 
@@ -584,12 +614,14 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             }
 
             try:
-                logger.debug(f"Sending prompt to OpenAI: {prompt}")
+                logger.debug(
+                    f"Sending prompt to OpenAI for user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}: {prompt}"
+                )
                 response = openai.chat.completions.create(
                     model=model_name, messages=prompt, response_format=response_format
                 )
                 logger.debug(
-                    f"Received OpenAI response: {response.choices[0].message.content}"
+                    f"Received OpenAI response for message from user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}: {response.choices[0].message.content}"
                 )
 
                 is_spam = json.loads(response.choices[0].message.content)["result"]
@@ -613,15 +645,18 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                         cursor.close()
                         conn.close()
                     except mysql.connector.Error as err:
-                        logger.error(f"Database error while updating spammer status for user {user_id}: {err}")
+                        logger.error(
+                            f"Database error while updating spammer status for user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}: {err}"
+                        )
                     suspicious_users_cache.remove(user_id)
                     logger.info(
-                        f"SPAM message from {user_id} ({update.message.from_user.username}) in group {chat_id} ({update.message.chat.title}), user will be banned in all groups"
+                        f"Detected SPAM message from user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}. The user will be banned in all groups."
                     )
                 else:
-                    legitimate_users_cache.add(user_id)
                     suspicious_users_cache.remove(user_id)
-                    logger.info(f"HAM message from {user_id}: {update.message.text}")
+                    logger.info(
+                        f"Message from user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)} was classified as legitimate."
+                    )
                     try:
                         conn = mysql.connector.connect(**db_config)
                         cursor = conn.cursor()
@@ -634,36 +669,38 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                         conn.close()
                     except mysql.connector.Error as err:
                         logger.error(
-                            f"Database error while updating user {user_id}: {err}"
+                            f"Database error while updating user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}: {err}"
                         )
             except Exception as e:
-                logger.error(f"Error querying OpenAI: {e}")
+                logger.error(
+                    f"Error querying OpenAI for message from user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}: {e}"
+                )
                 # await update.message.reply_text("Error processing the message.")
-        elif user_id in legitimate_users_cache:
-            logger.info(
-                f"Message from legitimate user {user_id} in group {chat_id} ignored"
-            )
         else:
-            logger.info(
-                f"Message from unknown user {user_id} in group {chat_id} ignored"
+            logger.debug(
+                f"Message from user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)} ignored as the user is not in the suspicious users cache."
             )
     else:
         await update.message.reply_text(
             "I am not set up correctly to work in this group. Use /start to configure me."
         )
-        logger.debug(f"Incoming message from unknown group {chat_id}")
+        logger.debug(
+            f"Message ignored from unconfigured group {display_chat(update.message.chat)} by user {display_user(update.message.from_user)}."
+        )
 
 
 async def handle_my_chat_members(update: Update, context: CallbackContext) -> None:
     # Обработка добавления бота в группу либо получения статуса админа
-    logger.debug(f"Handling my chat member update: {update}")
+    logger.debug(
+        f"Handling my group membership update in group {display_chat(update.my_chat_member.chat)}"
+    )
     chat_id = update.my_chat_member.chat.id
     member = update.my_chat_member.new_chat_member
     if member.user.id == context.bot.id:
         if isinstance(member, ChatMemberAdministrator):
             # Бот получил права администратора
             logger.debug(
-                f"Bot received admin rights in group {chat_id} ({update.my_chat_member.chat.title}) by {update.my_chat_member.from_user.id} ({update.my_chat_member.from_user.username})"
+                f"Bot has been promoted to administrator in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
             )
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -672,7 +709,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
         elif isinstance(member, ChatMemberMember):
             # Бот потерял права администратора
             logger.debug(
-                f"Bot lost admin rights in group {chat_id} ({update.my_chat_member.chat.title})"
+                f"Bot lost admin rights in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
             )
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -681,7 +718,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
         elif isinstance(member, ChatMemberLeft):
             # Бот был удален из группы
             logger.debug(
-                f"Bot removed from group {chat_id} ({update.my_chat_member.chat.title})"
+                f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
             )
             group = next(
                 (
@@ -706,26 +743,26 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                     conn.close()
                     configured_groups_cache.remove(group)
                     logger.info(
-                        f"Group {chat_id} removed from configured groups cache and database."
+                        f"Group {chat_id} ({update.my_chat_member.chat.title}) removed from configured groups cache and database by user {update.my_chat_member.from_user.id} ({update.my_chat_member.from_user.username})."
                     )
                 except mysql.connector.Error as err:
                     logger.error(
-                        f"Database error while removing group {chat_id}: {err}"
+                        f"Database error while removing group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}: {err}"
                     )
                     raise SystemExit(
                         "Bot removed from group and database update failed."
                     )
                 logger.info(
-                    f"Bot has been removed from group {update.my_chat_member.chat.id} ({update.my_chat_member.chat.title})"
+                    f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}"
                 )
             else:
                 logger.debug(
-                    f"Bot has been removed from group {chat_id} ({update.my_chat_member.chat.title}), which was not in configured groups cache."
+                    f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}, which was not in configured groups cache."
                 )
         else:
             # Бот добавлен в группу
             logger.debug(
-                f"Bot added to group {chat_id} ({update.my_chat_member.chat.title}) by {update.my_chat_member.from_user.id} ({update.my_chat_member.from_user.username})"
+                f"Bot added to group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
             )
             try:
                 chat_member = await context.bot.get_chat_member(
@@ -734,7 +771,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
 
                 if chat_member.status not in ["administrator", "creator"]:
                     logger.debug(
-                        f"Non-admin user {update.my_chat_member.from_user.id} tried to add the bot to group {chat_id}."
+                        f"Non-admin user {display_user(update.my_chat_member.from_user)} tried to add the bot to group {display_chat(update.my_chat_member.chat)}."
                     )
                     await context.bot.send_message(
                         chat_id=chat_id,
@@ -743,7 +780,9 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                     await context.bot.leave_chat(chat_id)
                     return
             except BadRequest as e:
-                logger.error(f"BadRequest error while checking chat member status: {e}")
+                logger.error(
+                    f"BadRequest error while checking chat member status in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}: {e}"
+                )
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -753,7 +792,11 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
 
 async def handle_other_chat_members(update: Update, context: CallbackContext) -> None:
     # Обработка добавления новых участников в группу
-    logger.debug(f"Handling other chat members in group {update.chat_member.chat.id}")
+    event_type = type(update.chat_member.new_chat_member).__name__
+    target_user = update.chat_member.new_chat_member.user
+    logger.debug(
+        f"Handling membership event '{event_type}' in group {display_chat(update.chat_member.chat)} for user {display_user(update.chat_member.from_user)} targeting user {display_user(target_user)}"
+    )
     chat_id = update.chat_member.chat.id
     member = update.chat_member.new_chat_member
 
@@ -761,7 +804,9 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
         user_id = member.user.id
         if user_id in spammers_cache:
             await context.bot.kick_chat_member(chat_id, user_id)
-            logger.info(f"Banned spammer {user_id} from group {chat_id}")
+            logger.info(
+                f"Banned spammer {display_user(member.user)} from group {display_chat(update.chat_member.chat)}"
+            )
         else:
             try:
                 conn = mysql.connector.connect(**db_config)
@@ -775,33 +820,34 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 conn.close()
                 if (
                     user_id not in suspicious_users_cache
-                    and user_id not in legitimate_users_cache
                 ):
                     suspicious_users_cache.add(user_id)
                     logger.debug(
-                        f"New user {user_id} added to suspicious users cache for joining to group {chat_id} ({update.chat_member.chat.title})"
+                        f"New user {display_user(member.user)} added to suspicious users cache for joining group {display_chat(update.chat_member.chat)}"
                     )
                 else:
+                    user_display_name = f"{member.user.first_name or ''} {member.user.last_name or ''}".strip()
+                    if member.user.username:
+                        user_display_name = f"{user_display_name} (@{member.user.username})".strip()
                     logger.info(
-                        f"New member {user_id} added to group {chat_id} ({update.chat_member.chat.title})"
+                        f"New member {display_user(member.user)} added to group {display_chat(update.chat_member.chat)}"
                     )
             except mysql.connector.Error as err:
                 logger.error(
-                    f"Database error while adding new member {user_id} to group {chat_id}: {err}"
+                    f"Database error while adding new member {display_user(member.user)} to group {display_chat(update.chat_member.chat)}: {err}"
                 )
 
 
 def load_user_caches():
     logger.debug("Loading user caches from the database.")
-    global legitimate_users_cache, suspicious_users_cache, spammers_cache
-    legitimate_users_cache = set()
+    global suspicious_users_cache, spammers_cache
     suspicious_users_cache = set()
     spammers_cache = set()
     try:
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
 
-        # Загрузка спамеров
+        # Загрузка спамеров за последние 30 дней (больше незачем, телега такого спамера сама забанит)
         cursor.execute(
             """
             SELECT user_id FROM user_entries 
@@ -819,20 +865,13 @@ def load_user_caches():
         )
         suspicious_users_cache = {row[0] for row in cursor.fetchall()}
 
-        # Загрузка легитимных пользователей
-        cursor.execute(
-            """
-            SELECT user_id FROM user_entries 
-            WHERE seen_message = TRUE AND spammer = FALSE
-        """
-        )
-        legitimate_users_cache = {row[0] for row in cursor.fetchall()}
-
         cursor.close()
         conn.close()
-        logger.debug("User caches loaded successfully.")
+        logger.debug(
+            f"User caches loaded successfully. Suspicious users: {len(suspicious_users_cache)}, Spammers: {len(spammers_cache)}"
+        )
     except mysql.connector.Error as err:
-        logger.critical(f"Database error: {err}. Terminating app.")
+        logger.critical(f"Database error while loading user caches: {err}. Terminating application.")
         raise SystemExit("Database error.")
 
 
@@ -903,6 +942,7 @@ def main():
         logger.warning("Bot started.")
         # dispatcher.idle()
     except RuntimeError as e:
+        # при graceful shutdown происходит какая-то фигня, но я недостаточно понимаю Asyncio, чтобы понять, что именно
         if "Event loop is closed" in str(e):
             logger.error("Event loop is closed. Attempting to restart the event loop.")
             loop = asyncio.new_event_loop()
