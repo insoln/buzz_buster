@@ -18,6 +18,7 @@ from openai import OpenAI
 import json
 import asyncio
 from telegram import ChatMemberAdministrator, ChatMemberMember, ChatMemberLeft
+import aiohttp
 
 # Загрузка переменных окружения
 telegram_api_key = os.getenv("TELEGRAM_API_KEY")
@@ -789,6 +790,15 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                 text="Hello! I am your antispam guard bot. Thank you for adding me to the group. Make me an administrator to enable my features.",
             )
 
+async def check_cas_ban(user_id) -> bool:
+    # Проверка пользователя на наличие бана в Combot Anti-Spam System
+    url = f"https://api.cas.chat/check?user_id={user_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get("ok", False)
+            return False
 
 async def handle_other_chat_members(update: Update, context: CallbackContext) -> None:
     # Обработка добавления новых участников в группу
@@ -801,14 +811,18 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
     member = update.chat_member.new_chat_member
 
     if isinstance(member, ChatMemberMember):
+        # Новый участник присоединился к группе
         user_id = member.user.id
         if user_id in spammers_cache:
+            # известный спамер
             await context.bot.kick_chat_member(chat_id, user_id)
             logger.info(
                 f"Banned spammer {display_user(member.user)} from group {display_chat(update.chat_member.chat)}"
             )
         else:
+            # записываем подозрительным
             try:
+                # указываем, что видели юзера в именно этой группе
                 conn = mysql.connector.connect(**db_config)
                 cursor = conn.cursor()
                 cursor.execute(
@@ -818,24 +832,39 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 conn.commit()
                 cursor.close()
                 conn.close()
-                if (
-                    user_id not in suspicious_users_cache
-                ):
-                    suspicious_users_cache.add(user_id)
-                    logger.debug(
-                        f"New user {display_user(member.user)} added to suspicious users cache for joining group {display_chat(update.chat_member.chat)}"
-                    )
-                else:
-                    user_display_name = f"{member.user.first_name or ''} {member.user.last_name or ''}".strip()
-                    if member.user.username:
-                        user_display_name = f"{user_display_name} (@{member.user.username})".strip()
-                    logger.info(
-                        f"New member {display_user(member.user)} added to group {display_chat(update.chat_member.chat)}"
-                    )
+                
+                # добавляем в кэш
+                suspicious_users_cache.add(user_id)
+                logger.debug(
+                    f"User {display_user(member.user)} added to suspicious users cache for joining chat {display_chat(update.chat_member.chat)}"
+                )
             except mysql.connector.Error as err:
                 logger.error(
                     f"Database error while adding new member {display_user(member.user)} to group {display_chat(update.chat_member.chat)}: {err}"
                 )
+                
+            # проверяем на бан в CAS
+            is_cas_banned = await check_cas_ban(user_id)
+            if is_cas_banned:
+                spammers_cache.add(user_id)
+                await context.bot.kick_chat_member(chat_id, user_id)
+                try:
+                    conn = mysql.connector.connect(**db_config)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE user_entries SET spammer = TRUE WHERE user_id = %s",
+                        (user_id,),
+                    )
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    logger.info(
+                        f"User {display_user(member.user)} is banned by CAS and has been banned from group {display_chat(update.chat_member.chat)}"
+                    )
+                except mysql.connector.Error as err:
+                    logger.error(
+                        f"Database error while updating CAS banned user {display_user(member.user)} in group {display_chat(update.chat_member.chat)}: {err}"
+                    )
 
 
 def load_user_caches():
