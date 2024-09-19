@@ -1,0 +1,54 @@
+---
+services:
+  bot:
+    build: .
+    container_name: buzz_buster
+    volumes:
+      - ./bot:/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      # Токен бота
+      TELEGRAM_API_KEY: ${TELEGRAM_API_KEY}
+      # API-ключ для OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Название модели, которую будем использовать
+      MODEL_NAME: ${MODEL_NAME}
+      # ID администратора
+      ADMIN_TELEGRAM_ID: ${ADMIN_TELEGRAM_ID}
+      # Чат для статус-сообщений
+      STATUSCHAT_TELEGRAM_ID: ${STATUSCHAT_TELEGRAM_ID}
+      # Ограничение длины инпута в /set instructions
+      INSTRUCTIONS_LENGTH_LIMIT: 1024
+      # Инструкции по умолчанию
+      INSTRUCTIONS_DEFAULT_TEXT: "Текст содержит предложение быстрого и легкого заработка. Текст содержит гомоглифические подстановки. Текст содержит больше 5 эмодзи, следующих подряд."
+
+      # Настройки уровней логирования
+      FILE_LOG_LEVEL: ${FILE_LOG_LEVEL:-INFO}
+      CONSOLE_LOG_LEVEL: ${CONSOLE_LOG_LEVEL:-INFO}
+      TELEGRAM_LOG_LEVEL: ${TELEGRAM_LOG_LEVEL:-WARNING}
+
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-buzz_buster}
+      DB_USER: ${DB_USER:-default_db_user}
+      DB_PASSWORD: ${DB_PASSWORD:-default_db_password}
+    depends_on:
+      - db
+    restart: always
+
+  db:
+    image: mysql:latest
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-default_root_password}
+      MYSQL_DATABASE: ${DB_NAME:-buzz_buster}
+      MYSQL_USER: ${DB_USER:-default_db_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-default_db_password}
+    expose:
+      - "3306"
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:
