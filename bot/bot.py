@@ -571,7 +571,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         )
     elif is_group_configured(chat_id):
         if user_id in spammers_cache:
-            await context.bot.kick_chat_member(chat_id, user_id)
+            await context.bot.ban_chat_member(chat_id, user_id)
             await update.message.delete()
             logger.info(
                 f"Banned spammer {display_user(update.message.from_user)} from group {display_chat(update.message.chat)} and deleted their message: {update.message.text}"
@@ -708,9 +708,9 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                 text="I have been promoted to an administrator. I am ready to protect your group from spam! Use /start to configure me.",
             )
         elif isinstance(member, ChatMemberMember):
-            # Бот потерял права администратора
+            # Бот не имеет прав администратора
             logger.debug(
-                f"Bot lost admin rights in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
+                f"Bot currently does not have admin rights in group {display_chat(update.my_chat_member.chat)} as indicated by user {display_user(update.my_chat_member.from_user)}."
             )
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -815,7 +815,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
         user_id = member.user.id
         if user_id in spammers_cache:
             # известный спамер
-            await context.bot.kick_chat_member(chat_id, user_id)
+            await context.bot.ban_chat_member(chat_id, user_id)
             logger.info(
                 f"Banned spammer {display_user(member.user)} from group {display_chat(update.chat_member.chat)}"
             )
@@ -847,7 +847,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             is_cas_banned = await check_cas_ban(user_id)
             if is_cas_banned:
                 spammers_cache.add(user_id)
-                await context.bot.kick_chat_member(chat_id, user_id)
+                await context.bot.ban_chat_member(chat_id, user_id)
                 try:
                     conn = mysql.connector.connect(**db_config)
                     cursor = conn.cursor()
