@@ -700,13 +700,45 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
     if member.user.id == context.bot.id:
         if isinstance(member, ChatMemberAdministrator):
             # Бот получил права администратора
-            logger.debug(
-                f"Bot has been promoted to administrator in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
-            )
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="I have been promoted to an administrator. I am ready to protect your group from spam! Use /start to configure me.",
-            )
+            
+            if update.my_chat_member.chat.type == "channel":
+                # Бот добавлен в канал
+                try:
+                    conn = mysql.connector.connect(**db_config)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO `groups` (group_id) VALUES (%s) ON DUPLICATE KEY UPDATE group_id = %s",
+                        (chat_id, chat_id),
+                    )
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    configured_groups_cache.append({"group_id": chat_id, "settings": {}})
+                    logger.info(
+                        f"Channel {display_chat(update.my_chat_member.chat)} added to configured groups cache and database by user {display_user(update.my_chat_member.from_user)})."
+                    )
+                except mysql.connector.Error as err:
+                    logger.error(
+                        f"Database error while adding channel {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}: {err}"
+                    )
+                    raise SystemExit("Bot added to channel and database update failed.")
+            else:
+                # Бот добавлен в группу
+                logger.debug(
+                    f"Bot has been promoted to administrator in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
+                )
+                try:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text="I have been promoted to an administrator. I am ready to protect your group from spam! Use /start to configure me.",
+                    )
+                except BadRequest as e:
+                    if "not enough rights to send text messages" in str(e):
+                        logger.info(
+                            f"Bot promoted to administrator in group {display_chat(update.my_chat_member.chat)} but does not have the right to send messages."
+                        )
+                    else:
+                        raise
         elif isinstance(member, ChatMemberMember):
             # Бот не имеет прав администратора
             logger.debug(
