@@ -574,7 +574,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             await context.bot.ban_chat_member(chat_id, user_id)
             await update.message.delete()
             logger.info(
-                f"Banned spammer {display_user(update.message.from_user)} from group {display_chat(update.message.chat)} and deleted their message: {update.message.text}"
+                f"Banned spammer {display_user(update.message.from_user)} from group {display_chat(update.message.chat)} and deleted their message."
             )
             return
 
