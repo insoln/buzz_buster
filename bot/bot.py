@@ -849,8 +849,10 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             # известный спамер
             await context.bot.ban_chat_member(chat_id, user_id)
             logger.info(
-                f"Banned spammer {display_user(member.user)} from group {display_chat(update.chat_member.chat)}"
+            f"Banned spammer {display_user(member.user)} from group {display_chat(update.chat_member.chat)}"
             )
+            # Удаляем системное сообщение о присоединении
+            await context.bot.delete_message(chat_id, update.message.message_id)
         else:
             # записываем подозрительным
             try:
@@ -880,6 +882,8 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             if is_cas_banned:
                 spammers_cache.add(user_id)
                 await context.bot.ban_chat_member(chat_id, user_id)
+                # Удаляем системное сообщение о присоединении
+                await context.bot.delete_message(chat_id, update.message.message_id)
                 try:
                     conn = mysql.connector.connect(**db_config)
                     cursor = conn.cursor()
