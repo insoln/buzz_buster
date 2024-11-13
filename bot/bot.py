@@ -51,10 +51,10 @@ openai.api_key = OPENAI_API_KEY
 
 # Настройка базы данных MySQL
 DB_CONFIG = {
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
+    "user": os.getenv("DB_USER","default_db_user"),
+    "password": os.getenv("DB_PASSWORD","default_db_password"),
     "host": os.getenv("DB_HOST", "db"),
-    "database": os.getenv("DB_NAME"),
+    "database": os.getenv("DB_NAME","buzz_buster"),
 }
 
 # Создаем экземпляр бота для отправки уведомлений
@@ -83,25 +83,37 @@ console_handler.setFormatter(log_formatter)
 logger.addHandler(console_handler)
 
 
-class TelegramLogHandler(logging.Handler):
+class AsyncTelegramLogHandler(logging.Handler):
     """Класс для отправки логов в Telegram."""
 
     def __init__(self, bot_instance: Bot, chat_id: int):
         super().__init__()
         self.bot = bot_instance
         self.chat_id = int(chat_id)
+        self.loop = asyncio.new_event_loop() 
 
     def emit(self, record):
+        # self.format(record)
+        self.loop.create_task(self._async_emit(record))
+                                               
+    async def _async_emit(self, record):
         log_entry = self.format(record)
         try:
-            asyncio.create_task(self.bot.send_message(chat_id=self.chat_id, text=log_entry))
+            result= await self.bot.send_message(chat_id=self.chat_id, text=log_entry)
+            logger.debug(f"Log sent to Telegram: {log_entry}, {result}")
         except Exception as e:
-            print(f"Failed to send log via Telegram: {e}")
+            logger.removeHandler(self)
+            logger.error(f"Failed to send log via Telegram: {e}")
+            logger.addHandler(self)
+
+    def close(self) -> None:
+        self.loop.run_until_complete(asyncio.gather(*asyncio.all_tasks(self.loop)))
+        self.loop.close()
 
 
 # Логирование в Telegram
 if STATUSCHAT_TELEGRAM_ID:
-    telegram_handler = TelegramLogHandler(bot, STATUSCHAT_TELEGRAM_ID)
+    telegram_handler = AsyncTelegramLogHandler(bot, STATUSCHAT_TELEGRAM_ID)
     telegram_handler.setLevel(getattr(logging, TELEGRAM_LOG_LEVEL, logging.WARNING))
     telegram_handler.setFormatter(simple_formatter)
     logger.addHandler(telegram_handler)
@@ -492,7 +504,8 @@ def load_user_caches():
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Обработка входящих сообщений в настроенных группах."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         logger.debug("Received update without message.")
         return
 
@@ -500,11 +513,11 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
 
     logger.debug(
-        f"Handling message from user {display_user(user)} in chat {display_chat(update.effective_chat)} with text: {update.message.text}"
+        f"Handling message from user {display_user(user)} in chat {display_chat(update.effective_chat)}: {message}"
     )
 
     if update.effective_chat.type == "private":
-        await update.message.reply_text("Этот бот предназначен только для групп.")
+        await message.reply_text("Этот бот предназначен только для групп.")
         logger.debug("Received message in private chat.")
         return
 
@@ -516,13 +529,52 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     if user_id in spammers_cache:
         await context.bot.ban_chat_member(chat_id, user_id)
-        await update.message.delete()
+        await message.delete()
         logger.info(
             f"Banned known spammer {display_user(user)} from group {display_chat(update.effective_chat)}."
         )
         return
 
     if user_id in suspicious_users_cache:
+        
+        if message.video_note:
+            await context.bot.ban_chat_member(chat_id, user_id)
+            await message.delete()
+            spammers_cache.add(user_id)
+            suspicious_users_cache.discard(user_id)
+
+            # Update the database
+            try:
+                conn = mysql.connector.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO user_entries (user_id, group_id, join_date, seen_message, spammer)
+                    VALUES (%s, %s, NOW(), TRUE, TRUE)
+                    ON DUPLICATE KEY UPDATE spammer = TRUE, group_id = %s
+                    """,
+                    (user_id, chat_id, chat_id),
+                )
+                conn.commit()
+            except mysql.connector.Error as err:
+                logger.exception(f"Database error when updating spammer status: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+
+            logger.info(f"Banned user {user_id} for sending a video note.")
+            return
+        
+        # Получаем текст сообщения или подпись к медиафайлу
+        text_to_check = message.text or message.caption
+
+        # Если текст отсутствует или слишком короткий, пропускаем обработку
+        if not text_to_check or len(text_to_check.strip()) < 5:
+            logger.debug(
+                f"Message from {display_user(user)} is too short for processing."
+            )
+            return
+
         # Получаем настройки группы
         group_settings = next(
             (group["settings"] for group in configured_groups_cache if group["group_id"] == chat_id),
@@ -534,35 +586,44 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         prompt = [
             {
                 "role": "system",
-                "content": f"Является ли спамом сообщение от пользователя? Важные признаки спам-сообщений: {instructions}",
+                "content": f"Является ли спамом сообщение от пользователя? Важные признаки спам-сообщений: {group_settings.get('instructions', INSTRUCTIONS_DEFAULT_TEXT)}",
             },
-            {"role": "user", "content": f"{update.message.text}"},
-            {"role": "assistant", "content": "Ответьте в формате JSON: {'result': true} если это спам, {'result': false} если это не спам."},
+            {
+                "role": "user",
+                "content": f"Текст сообщения от пользователя: {update.message.text}",
+            },
         ]
+
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "boolean",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {"result": {"type": "boolean"}},
+                    "required": ["result"],
+                    "additionalProperties": False,
+                },
+            },
+        }
 
         try:
             logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
 
-            response = await openai.ChatCompletion.acreate(
-                model=MODEL_NAME,
-                messages=prompt,
-                temperature=0.0,  # Используем нулевую температуру для детерминированности
+            response = openai.chat.completions.create(
+                model=MODEL_NAME, messages=prompt, response_format=response_format
             )
 
-            assistant_reply = response["choices"][0]["message"]["content"]
-            logger.debug(f"Received OpenAI response: {assistant_reply}")
+            logger.debug(
+                f"Received OpenAI response for message from user {display_user(update.message.from_user)} in group {display_chat(update.message.chat)}: {response.choices[0].message.content}"
+            )
 
-            # Парсинг ответа
-            try:
-                result = json.loads(assistant_reply)
-                is_spam = result.get("result", False)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse OpenAI response: {e}")
-                is_spam = False
+            is_spam = json.loads(response.choices[0].message.content)["result"]
 
             if is_spam:
                 await context.bot.ban_chat_member(chat_id, user_id)
-                await update.message.delete()
+                await message.delete()
                 spammers_cache.add(user_id)
                 suspicious_users_cache.discard(user_id)
 
@@ -613,7 +674,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             logger.exception(f"Error querying OpenAI for message processing: {e}")
     else:
         logger.debug(f"User {display_user(user)} is not in suspicious users cache.")
-
 
 async def check_cas_ban(user_id: int) -> bool:
     """Проверка пользователя по базе CAS (Combot Anti-Spam)."""
@@ -723,12 +783,18 @@ def main():
 
     # Регистрация обработчиков сообщений
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1
+        MessageHandler(filters.TEXT & ~filters.COMMAND | filters.PHOTO | filters.VIDEO_NOTE, handle_message), group=1
     )
 
     # Регистрация обработчиков событий членов чата
     application.add_handler(ChatMemberHandler(handle_chat_members), group=1)
 
+    logger.warning("Bot started successfully.")
+    
+    
+    # Регистрация функции завершения работы
+    atexit.register(lambda: logger.warning("Bot is shutting down."))
+    
     # Запускаем бота
     application.run_polling()
 
