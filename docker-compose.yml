@@ -2,7 +2,7 @@
 services:
   bot:
     build: .
-    container_name: buzz_buster
+    container_name: buzz_buster.bot
     volumes:
       - ./bot:/app
       - ./logs:/app/logs
@@ -39,7 +39,7 @@ services:
 
   db:
     image: mysql:latest
-    container_name: mysql_db
+    container_name: buzz_buster.db
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-default_root_password}
       MYSQL_DATABASE: ${DB_NAME:-buzz_buster}
@@ -52,3 +52,4 @@ services:
     restart: always
 volumes:
   db_data:
+

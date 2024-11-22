@@ -35,8 +35,13 @@ services:
       DB_NAME: ${DB_NAME:-buzz_buster}
       DB_USER: ${DB_USER:-default_db_user}
       DB_PASSWORD: ${DB_PASSWORD:-default_db_password}
+
+    ports:
+      - "5678:5678"  # Expose the debug port
+
     depends_on:
       - db
+      
     restart: always
 
   db:
