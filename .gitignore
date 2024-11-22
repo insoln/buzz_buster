@@ -3,3 +3,4 @@ logs/bot.log
 .env
 .dockerignore
 .vscode/settings.json
+.vscode/tasks.json
