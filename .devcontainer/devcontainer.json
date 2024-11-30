@@ -20,7 +20,11 @@
 			]
 		},
 		"settings": {
-			"python.pythonPath": "/usr/local/bin/python"
+			"python.pythonPath": "/usr/local/bin/python",
+			"python.testing.pytestEnabled": true,
+			"python.testing.testpaths": [
+				"tests"
+			]
 		}
 	}
 }

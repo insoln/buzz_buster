@@ -16,5 +16,9 @@ RUN apk add --no-cache git
 COPY ../requirements.txt .
 RUN python -m pip install -r requirements.txt
 
+# Install pip requirements for debug
+COPY .devcontainer/requirements.debug.txt .
+RUN python -m pip install -r requirements.debug.txt
+
 # WORKDIR /app
 # COPY .. /app

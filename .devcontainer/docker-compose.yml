@@ -6,6 +6,7 @@ services:
       - ../bot/app:/workspace/app
       - ../.vscode:/workspace/.vscode
       - ../logs:/workspace/logs
+      - ./tests:/workspace/tests
 
     # Overrides default command so things don't shut down after the process ends.
     command: sleep infinity
@@ -17,7 +18,7 @@ services:
       dockerfile: .devcontainer/Dockerfile      
 
     env_file:
-      - ../.env
+      - .env
     environment:
       # Токен бота
       TELEGRAM_API_KEY: ${TELEGRAM_API_KEY}
@@ -32,7 +33,7 @@ services:
       # Ограничение длины инпута в /set instructions
       INSTRUCTIONS_LENGTH_LIMIT: 1024
       # Инструкции по умолчанию
-      INSTRUCTIONS_DEFAULT_TEXT: "Текст содержит предложение быстрого и легкого заработка. Текст содержит гомоглифические подстановки. Текст содержит больше 5 эмодзи, следующих подряд. Текст предлагает бесплатные обучающие материалы, которые больше не нужны. Текст упоминает криптобиржи или криптовалюты и содержит приглашение написать автору личное сообщение."
+      INSTRUCTIONS_DEFAULT_TEXT: ${INSTRUCTIONS_DEFAULT_TEXT:-Любые спам-признаки.}
 
       # Настройки уровней логирования
       FILE_LOG_LEVEL: ${FILE_LOG_LEVEL:-INFO}

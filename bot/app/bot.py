@@ -36,7 +36,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 INSTRUCTIONS_LENGTH_LIMIT = int(os.getenv("INSTRUCTIONS_LENGTH_LIMIT", "1024"))
 INSTRUCTIONS_DEFAULT_TEXT = os.getenv(
-    "INSTRUCTIONS_DEFAULT_TEXT", "Сообщения, содержащие спам-признаки."
+    "INSTRUCTIONS_DEFAULT_TEXT", "Любые спам-признаки."
 )
 ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
 STATUSCHAT_TELEGRAM_ID = os.getenv("STATUSCHAT_TELEGRAM_ID")
