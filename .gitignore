@@ -1,3 +1,4 @@
-logs/bot.log
 .vscode/launch.json
 .env
+.devcontainer/database
+*.log

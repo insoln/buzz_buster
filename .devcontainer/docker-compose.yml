@@ -59,6 +59,6 @@ services:
     expose:
       - "3306"
     volumes:
-      - ./datadase:/var/lib/mysql
+      - ./database:/var/lib/mysql
     restart: unless-stopped
 
