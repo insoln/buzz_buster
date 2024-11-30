@@ -70,7 +70,7 @@ simple_formatter = logging.Formatter("%(message)s")
 
 # Логирование в файл
 file_handler = RotatingFileHandler(
-    "logs/bot.log", maxBytes=5 * 1024 * 1024, backupCount=2
+    "buzzbuster.log", maxBytes=5 * 1024 * 1024, backupCount=2
 )
 file_handler.setLevel(getattr(logging, FILE_LOG_LEVEL, logging.INFO))
 file_handler.setFormatter(log_formatter)
