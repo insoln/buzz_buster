@@ -1,11 +1,18 @@
 ---
 services:
+  # Update this to the name of the service you want to work with in your docker-compose.yml file
   bot:
-    build: .
-    container_name: buzz_buster.bot
     volumes:
-      - ./bot:/app
-      - ./logs:/app/logs
+      - ./bot/app:/workspace/app
+      - ./.vscode:/workspace/.vscode
+      - ./logs/bot.log:/workspace/app/buzzbuster.log
+
+    image: buzzbuster_bot
+    container_name: buzz_buster.dev.bot
+    build:
+      context: ..
+      dockerfile: Dockerfile      
+
     env_file:
       - .env
     environment:
@@ -35,11 +42,11 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-default_db_password}
     depends_on:
       - db
-    restart: always
+    restart: unless-stopped
 
   db:
     image: mysql:latest
-    container_name: buzz_buster.db
+    container_name: buzz_buster.dev.db
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-default_root_password}
       MYSQL_DATABASE: ${DB_NAME:-buzz_buster}
@@ -49,7 +56,5 @@ services:
       - "3306"
     volumes:
       - db_data:/var/lib/mysql
-    restart: always
-volumes:
-  db_data:
+    restart: unless-stopped
 
