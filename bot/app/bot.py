@@ -15,6 +15,7 @@ from telegram import (
     ChatMember,
     ChatMemberAdministrator,
     ChatMemberLeft,
+    ChatMemberBanned,
     ChatMemberMember,
     Update,
     User,
@@ -629,20 +630,145 @@ async def check_cas_ban(user_id: int) -> bool:
 
 
 async def handle_my_chat_members(update: Update, context: CallbackContext) -> None:
-    """Обработка обновления статуса бота в чате."""
+    # Обработка добавления бота в группу либо получения статуса админа
     logger.debug(
-        f"Handling my_chat_member update in chat {display_chat(update.effective_chat)}."
+        f"Handling my group membership update in group {display_chat(update.my_chat_member.chat)}"
     )
-    # Здесь можно добавить обработку изменений статуса бота в группе (например, получение админ прав)
+    chat_id = update.my_chat_member.chat.id
+    member = update.my_chat_member.new_chat_member
+    if member.user.id == context.bot.id:
+        if isinstance(member, ChatMemberAdministrator):
+            # Бот получил права администратора
+            
+            if update.my_chat_member.chat.type == "channel":
+                # Бот добавлен в канал
+                try:
+                    conn = mysql.connector.connect(**DB_CONFIG)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO `groups` (group_id) VALUES (%s) ON DUPLICATE KEY UPDATE group_id = %s",
+                        (chat_id, chat_id),
+                    )
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    configured_groups_cache.append({"group_id": chat_id, "settings": {}})
+                    logger.info(
+                        f"Channel {display_chat(update.my_chat_member.chat)} added to configured groups cache and database by user {display_user(update.my_chat_member.from_user)})."
+                    )
+                except mysql.connector.Error as err:
+                    logger.error(
+                        f"Database error while adding channel {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}: {err}"
+                    )
+                    raise SystemExit("Bot added to channel and database update failed.")
+            else:
+                # Бот добавлен в группу
+                logger.debug(
+                    f"Bot has been promoted to administrator in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
+                )
+                try:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text="I have been promoted to an administrator. I am ready to protect your group from spam! Use /start to configure me.",
+                    )
+                except BadRequest as e:
+                    if "not enough rights to send text messages" in str(e):
+                        logger.info(
+                            f"Bot promoted to administrator in group {display_chat(update.my_chat_member.chat)} but does not have the right to send messages."
+                        )
+                    else:
+                        raise
+        elif isinstance(member, ChatMemberMember):
+            # Бот не имеет прав администратора
+            logger.debug(
+                f"Bot currently does not have admin rights in group {display_chat(update.my_chat_member.chat)} as indicated by user {display_user(update.my_chat_member.from_user)}."
+            )
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="I need administrator rights, I cannot protect your group from spam without them. Please promote me to an administrator.",
+            )
+        elif isinstance(member, ChatMemberLeft) or  isinstance(member, ChatMemberBanned):
+            # Бот был удален из группы
+            logger.debug(
+                f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
+            )
+            group = next(
+                (
+                    group
+                    for group in configured_groups_cache
+                    if group["group_id"] == chat_id
+                ),
+                None,
+            )
+            if group:
+                try:
+                    conn = mysql.connector.connect(**DB_CONFIG)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "DELETE FROM `groups` WHERE group_id = %s", (chat_id,)
+                    )
+                    cursor.execute(
+                        "DELETE FROM `group_settings` WHERE group_id = %s", (chat_id,)
+                    )
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    configured_groups_cache.remove(group)
+                    logger.info(
+                        f"Group {chat_id} ({update.my_chat_member.chat.title}) removed from configured groups cache and database by user {update.my_chat_member.from_user.id} ({update.my_chat_member.from_user.username})."
+                    )
+                except mysql.connector.Error as err:
+                    logger.error(
+                        f"Database error while removing group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}: {err}"
+                    )
+                    raise SystemExit(
+                        "Bot removed from group and database update failed."
+                    )
+                logger.info(
+                    f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}"
+                )
+            else:
+                logger.debug(
+                    f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}, which was not in configured groups cache."
+                )
+        else:
+            # Бот добавлен в группу
+            logger.debug(
+                f"Bot added to group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}."
+            )
+            try:
+                chat_member = await context.bot.get_chat_member(
+                    chat_id, update.my_chat_member.from_user.id
+                )
+
+                if chat_member.status not in ["administrator", "creator"]:
+                    logger.debug(
+                        f"Non-admin user {display_user(update.my_chat_member.from_user)} tried to add the bot to group {display_chat(update.my_chat_member.chat)}."
+                    )
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text="Only administrators can add the bot to the group. I will leave now.",
+                    )
+                    await context.bot.leave_chat(chat_id)
+                    return
+            except BadRequest as e:
+                logger.error(
+                    f"BadRequest error while checking chat member status in group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}: {e}"
+                )
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Hello! I am your antispam guard bot. Thank you for adding me to the group. Make me an administrator to enable my features.",
+            )
 
 
-async def handle_chat_members(update: Update, context: CallbackContext) -> None:
+async def handle_other_chat_members(update: Update, context: CallbackContext) -> None:
     """Обработка добавления новых участников в группу."""
     chat_id = update.effective_chat.id
-    user = update.chat_member.new_chat_member.user
+    user = update.my_chat_member.new_chat_member.user
 
     # Проверяем, снова ли пользователь вошёл в группу
-    if isinstance(update.chat_member.new_chat_member, ChatMemberMember):
+    if isinstance(update.my_chat_member.new_chat_member, ChatMemberMember):
         logger.debug(
             f"User {display_user(user)} joined the group {display_chat(update.effective_chat)}."
         )
@@ -690,16 +816,15 @@ async def handle_chat_members(update: Update, context: CallbackContext) -> None:
         )
 
 
-def main():
-    logger.debug("Starting bot.")
+async def main():
+    logger.info("Starting bot.")
     if not TELEGRAM_API_KEY:
         logger.critical("TELEGRAM_API_KEY environment variable not set. Terminating app.")
         return
 
     # Проверка валидности ключа
     try:
-        loop = asyncio.get_event_loop()
-        me=loop.run_until_complete(bot.get_me())
+        me = await bot.get_me()
         logger.debug(f"Telegram API key is valid. Bot {display_user(me)} started")
     except Exception as e:
         logger.exception(f"Invalid TELEGRAM_API_KEY: {e}")
@@ -707,7 +832,6 @@ def main():
 
     # Проверка и создание таблиц
     check_and_create_tables()
-
     # Загрузка настроенных групп и кешей пользователей
     load_configured_groups()
     load_user_caches()
@@ -726,12 +850,41 @@ def main():
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1
     )
 
-    # Регистрация обработчиков событий членов чата
-    application.add_handler(ChatMemberHandler(handle_chat_members), group=1)
+    # Регистрируем обработчик изменения членства себя в группе
+    application.add_handler(
+        ChatMemberHandler(handle_my_chat_members, ChatMemberHandler.MY_CHAT_MEMBER),
+        group=2,
+    )
+    # Регистрируем обработчик изменения членства других в группе
+    application.add_handler(
+        ChatMemberHandler(handle_other_chat_members, ChatMemberHandler.CHAT_MEMBER),
+        group=2,
+    )
+    
+    # Регистрируем обработчик всех входящих событий для дебага
+    async def log_event(update: Update, context: CallbackContext) -> None:
+        logger.debug(f"Received event: {update}")
+        if update.my_chat_member:
+            logger.debug(f"my_chat_member event: {update.my_chat_member}")
+        if update.chat_member:
+            logger.debug(f"chat_member event: {update.chat_member}")
+
+    application.add_handler(MessageHandler(filters.ALL, log_event), group=3)
 
     # Запускаем бота
-    application.run_polling()
-
+    await application.initialize()
+    await application.updater.start_polling()
+    await application.start()
+    
+    try:
+        # Run the bot until a termination signal is received
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit, asyncio.exceptions.CancelledError):
+        logger.debug("Termination signal received. Shutting down...")
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
+        logger.info("Bot stopped.")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
