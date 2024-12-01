@@ -18,8 +18,9 @@ from telegram import (
     ChatMemberBanned,
     ChatMemberMember,
     Update,
-    User,
+    User, 
 )
+from telegram.constants import ChatMemberStatus
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -497,36 +498,34 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         logger.debug("Received update without message.")
         return
 
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
     user = update.effective_user
 
     logger.debug(
-        f"Handling message from user {display_user(user)} in chat {display_chat(update.effective_chat)} with text: {update.message.text}"
+        f"Handling message from user {display_user(user)} in chat {display_chat(chat)} with text: {update.message.text}"
     )
 
-    if update.effective_chat.type == "private":
+    if chat.type == "private":
         await update.message.reply_text("Этот бот предназначен только для групп.")
         logger.debug("Received message in private chat.")
         return
 
-    if not is_group_configured(chat_id):
-        logger.debug(f"Group {chat_id} is not configured.")
+    if not is_group_configured(chat.id):
+        logger.debug(f"Group {chat.id} is not configured.")
         return
 
-    user_id = user.id
-
-    if user_id in spammers_cache:
-        await context.bot.ban_chat_member(chat_id, user_id)
+    if user.id in spammers_cache:
+        await context.bot.ban_chat_member(chat.id, user.id)
         await update.message.delete()
         logger.info(
-            f"Banned known spammer {display_user(user)} from group {display_chat(update.effective_chat)}."
+            f"Banned known spammer {display_user(user)} from group {display_chat(chat)}."
         )
         return
 
-    if user_id in suspicious_users_cache:
+    if user.id in suspicious_users_cache:
         # Получаем настройки группы
         group_settings = next(
-            (group["settings"] for group in configured_groups_cache if group["group_id"] == chat_id),
+            (group["settings"] for group in configured_groups_cache if group["group_id"] == chat.id),
             {},
         )
         instructions = group_settings.get("instructions", INSTRUCTIONS_DEFAULT_TEXT)
@@ -538,34 +537,48 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                 "content": f"Является ли спамом сообщение от пользователя? Важные признаки спам-сообщений: {instructions}",
             },
             {"role": "user", "content": f"{update.message.text}"},
-            {"role": "assistant", "content": "Ответьте в формате JSON: {'result': true} если это спам, {'result': false} если это не спам."},
         ]
+        response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "boolean",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {"result": {"type": "boolean"}},
+                        "required": ["result"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
 
         try:
             logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
 
-            response = await openai.ChatCompletion.acreate(
-                model=MODEL_NAME,
-                messages=prompt,
-                temperature=0.0,  # Используем нулевую температуру для детерминированности
-            )
-
-            assistant_reply = response["choices"][0]["message"]["content"]
-            logger.debug(f"Received OpenAI response: {assistant_reply}")
+            response = openai.chat.completions.create(
+                    model=MODEL_NAME, messages=prompt, response_format=response_format
+                )
+            reply=response.choices[0].message.content
+            logger.debug(
+                    f"Received OpenAI response for message from user {display_user(user)} in group {display_chat(chat)}: {reply}"
+                )
 
             # Парсинг ответа
             try:
-                result = json.loads(assistant_reply)
+                result = json.loads(reply)
                 is_spam = result.get("result", False)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse OpenAI response: {e}")
                 is_spam = False
 
             if is_spam:
-                await context.bot.ban_chat_member(chat_id, user_id)
+                logger.info(
+                    f"User {display_user(user)} is identified as spammer, it will be banned in all groups."
+                )
+                await context.bot.ban_chat_member(chat.id, user.id)
                 await update.message.delete()
-                spammers_cache.add(user_id)
-                suspicious_users_cache.discard(user_id)
+                spammers_cache.add(user.id)
+                suspicious_users_cache.discard(user.id)
 
                 # Обновление базы данных
                 try:
@@ -573,11 +586,9 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     cursor = conn.cursor()
                     cursor.execute(
                         """
-                        INSERT INTO `user_entries` (user_id, group_id, join_date, seen_message, spammer)
-                        VALUES (%s, %s, NOW(), TRUE, TRUE)
-                        ON DUPLICATE KEY UPDATE spammer = TRUE, group_id = %s
+                        UPDATE `user_entries` set spammer = TRUE where user_id=%s and group_id = %s
                         """,
-                        (user_id, chat_id, chat_id),
+                        (user.id, chat.id),
                     )
                     conn.commit()
                 except mysql.connector.Error as err:
@@ -587,10 +598,10 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     conn.close()
 
                 logger.info(
-                    f"Banned spammer {display_user(user)} from group {display_chat(update.effective_chat)}."
+                    f"Banned spammer {display_user(user)} from group {display_chat(chat)}."
                 )
             else:
-                suspicious_users_cache.discard(user_id)
+                suspicious_users_cache.discard(user.id)
                 try:
                     conn = mysql.connector.connect(**DB_CONFIG)
                     cursor = conn.cursor()
@@ -598,7 +609,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                         """
                         UPDATE user_entries SET seen_message = TRUE, spammer = FALSE WHERE user_id = %s
                         """,
-                        (user_id,),
+                        (user.id,),
                     )
                     conn.commit()
                 except mysql.connector.Error as err:
@@ -764,32 +775,28 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
 
 async def handle_other_chat_members(update: Update, context: CallbackContext) -> None:
     """Обработка добавления новых участников в группу."""
-    chat_id = update.effective_chat.id
-    user = update.my_chat_member.new_chat_member.user
+    chat = update.effective_chat
+    member = update.chat_member.new_chat_member
 
     # Проверяем, снова ли пользователь вошёл в группу
-    if isinstance(update.my_chat_member.new_chat_member, ChatMemberMember):
-        logger.debug(
-            f"User {display_user(user)} joined the group {display_chat(update.effective_chat)}."
-        )
-        user_id = user.id
-
-        if user_id in spammers_cache:
-            await context.bot.ban_chat_member(chat_id, user_id)
+    if member.status==ChatMemberStatus.MEMBER:
+        if member.user.id in spammers_cache:
+            await context.bot.ban_chat_member(chat.id, member.user.id)
             logger.info(
-                f"Automatically banned known spammer {display_user(user)} from group {chat_id}."
+                f"Automatically banned known spammer {display_user(member.user)} from group {chat.id}."
             )
             return
 
-        suspicious_users_cache.add(user_id)
+        suspicious_users_cache.add(member.user.id)
+        logger.debug(f"Added user {display_user(member.user)} to suspicious users cache.")
 
         # Проверка на CAS бан
-        is_cas_banned = await check_cas_ban(user_id)
+        is_cas_banned = await check_cas_ban(member.user.id)
         if is_cas_banned:
-            await context.bot.ban_chat_member(chat_id, user_id)
-            spammers_cache.add(user_id)
+            await context.bot.ban_chat_member(chat.id, member.user.id)
+            spammers_cache.add(member.user.id)
             logger.info(
-                f"User {display_user(user)} is CAS banned and was removed from group {chat_id}."
+                f"User {display_user(member.user)} is CAS banned and was removed from group {chat.id}."
             )
         else:
             # Запись в базу данных
@@ -802,19 +809,23 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                     VALUES (%s, %s, NOW())
                     ON DUPLICATE KEY UPDATE join_date=NOW()
                     """,
-                    (user_id, chat_id),
+                    (member.user.id, chat.id),
                 )
                 conn.commit()
             except mysql.connector.Error as err:
-                logger.exception(f"Database error when adding new user {user_id}: {err}")
+                logger.exception(f"Database error when adding new user {member.user.id}: {err}")
             finally:
                 cursor.close()
                 conn.close()
+    elif member.status==ChatMemberStatus.LEFT:
+        logger.debug(
+            f"User {display_user(member.user)} left the group {display_chat(chat)}."
+        )
     else:
         logger.debug(
-            f"Received chat_member update for user {display_user(user)} in chat {chat_id}."
+            f"Received chat_member update for user {display_user(member.user)} in chat {display_chat(chat)}."
         )
-
+        
 
 async def main():
     logger.info("Starting bot.")
@@ -860,20 +871,17 @@ async def main():
         ChatMemberHandler(handle_other_chat_members, ChatMemberHandler.CHAT_MEMBER),
         group=2,
     )
-    
+
+
     # Регистрируем обработчик всех входящих событий для дебага
     async def log_event(update: Update, context: CallbackContext) -> None:
         logger.debug(f"Received event: {update}")
-        if update.my_chat_member:
-            logger.debug(f"my_chat_member event: {update.my_chat_member}")
-        if update.chat_member:
-            logger.debug(f"chat_member event: {update.chat_member}")
 
-    application.add_handler(MessageHandler(filters.ALL, log_event), group=3)
+    application.add_handler(MessageHandler(filters.ALL, log_event), group=0)
 
     # Запускаем бота
     await application.initialize()
-    await application.updater.start_polling()
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
     await application.start()
     
     try:
