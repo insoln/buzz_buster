@@ -19,25 +19,30 @@
     cp .env.example .env
     ```
 
-    ```plaintext
-    TELEGRAM_API_KEY=your_telegram_api_key      # Токен бота (полученный через @BotFather)
-    OPENAI_API_KEY=your_openai_api_key          # API-ключ OpenAI
-    ADMIN_TELEGRAM_ID=your_admin_telegram_id    # ID администратора бота (пока нигде не используется)
-    STATUSCHAT_TELEGRAM_ID=your_logs_chat_id    # ID чата для логов (можно использовать ID администратора или выделенной группы)
+    ```properties
+    # Telegram Bot
+    TELEGRAM_API_KEY=your_telegram_api_key      # Токен бота (из @BotFather)
+
+    # OpenAI
+    OPENAI_API_KEY=your_openai_api_key          # OpenAI API-ключ
+
+    # Telegram Admin
+    ADMIN_TELEGRAM_ID=your_admin_telegram_id    # Telegram ID администратора бота
+
+    # Status Logging
+    STATUSCHAT_TELEGRAM_ID=your_logs_chat_id    # Telegram ID чата для логов
+
+    # Критерии спама
+    INSTRUCTIONS_DEFAULT_TEXT=Любые спам-признаки.
     ```
 
     Данные бота хранятся в базе MySQL, которая поднимается в параллельном контейнере. При желании можно использовать внешний сервер MySQL, тогда в .env нужно раскомментировать соответствующие строки, а в docker-compose.yml, наоборот, закомментировать
-
-    В docker-compose.yml есть еще две переменные, которые относятся к механизму критериев проверки на спам:
-    ```plaintext
-    INSTRUCTIONS_DEFAULT_TEXT - текст критериев проверки на спам по умолчанию
-    INSTRUCTIONS_LENGTH_LIMIT - ограничение на длину поля с кастомными критериями при переопределении для конкретной группы
-    ```
 
 3. Запустите docker:
     ```sh
     docker compose up --build -d
     ```
+
 ## Использование
 
 1. Добавьте бота в вашу группу Telegram
@@ -58,7 +63,7 @@
 1. Установите [Visual Studio Code](https://code.visualstudio.com/).
 2. Установите [Remote - Containers](https://aka.ms/vscode-remote/download/extension) расширение для VS Code.
 3. Откройте проект в VS Code.
-4. Нажмите `F1`, введите `Remote-Containers: Open Folder in Container...` и выберите текущую папку проекта.
+4. Нажмите `F1`, введите ` Dev Containers: Open Folder in Container...` и выберите текущую папку проекта.
 5. Дождитесь, пока контейнер будет развернут и запущен. Может понадобиться несколько секунд на то, чтобы все расширения корректно установились в контейнер.
 
 ### Как получить поддержку?
