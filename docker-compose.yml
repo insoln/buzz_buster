@@ -10,7 +10,7 @@ services:
     image: buzzbuster_bot
     container_name: buzz_buster.dev.bot
     build:
-      context: ..
+      context: .
       dockerfile: ./Dockerfile      
 
     env_file:
