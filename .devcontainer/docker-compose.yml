@@ -63,5 +63,3 @@ services:
       - ./database:/var/lib/mysql
     restart: unless-stopped
 
-volumes:
-  db_data:
