@@ -8,7 +8,7 @@ services:
       - ./logs/bot.log:/workspace/app/buzzbuster.log
 
     image: buzzbuster_bot
-    container_name: buzz_buster.dev.bot
+    container_name: buzz_buster.bot
     build:
       context: .
       dockerfile: ./Dockerfile      
@@ -46,7 +46,7 @@ services:
 
   db:
     image: mysql:latest
-    container_name: buzz_buster.dev.db
+    container_name: buzz_buster.db
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-default_root_password}
       MYSQL_DATABASE: ${DB_NAME:-buzz_buster}
