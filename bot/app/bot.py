@@ -1,18 +1,20 @@
 import asyncio
-from telegram_messages import (
-    handle_message,
+from .telegram_messages import (
+    handle_message
+)
+from .telegram_groupmembership import (
     handle_my_chat_members,
     handle_other_chat_members
 )
-from telegram_comands import (
+from .telegram_commands import (
     get_command,
     help_command,
     set_command,
     start_command
 )
-from logging_setup import logger
-from formatting import display_chat, display_user
-from database import (
+from .logging_setup import logger
+from .formatting import display_chat, display_user
+from .database import (
     check_and_create_tables,
     load_configured_groups,
     load_user_caches,
@@ -29,12 +31,12 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-import config
+from .config import *
 
 
 async def main():
     logger.info("Starting bot.")
-    if not config.TELEGRAM_API_KEY:
+    if not TELEGRAM_API_KEY:
         logger.critical(
             "TELEGRAM_API_KEY environment variable not set. Terminating app.")
         return
@@ -46,7 +48,7 @@ async def main():
     load_user_caches()
 
     # Инициализируем приложение
-    application = Application.builder().token(config.TELEGRAM_API_KEY).build()
+    application = Application.builder().token(TELEGRAM_API_KEY).build()
 
     # Проверка валидности ключа
     try:

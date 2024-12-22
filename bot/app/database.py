@@ -1,5 +1,5 @@
-import config
-from logging_setup import logger
+from .config import *
+from .logging_setup import logger
 import mysql.connector
 
 
@@ -12,7 +12,7 @@ def check_and_create_tables():
     """Проверка и создание необходимых таблиц в базе данных."""
     logger.debug("Checking and creating necessary tables in the database.")
     try:
-        conn = mysql.connector.connect(**config.DB_CONFIG)
+        conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -65,7 +65,7 @@ def load_configured_groups():
     logger.debug("Loading configured groups from the database.")
 
     try:
-        conn = mysql.connector.connect(**config.DB_CONFIG)
+        conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor(dictionary=True)
 
         cursor.execute(
@@ -105,7 +105,7 @@ def load_user_caches():
     spammers_cache = set()
     logger.debug("Loading user caches from the database.")
     try:
-        conn = mysql.connector.connect(**config.DB_CONFIG)
+        conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
         # Загрузка спамеров

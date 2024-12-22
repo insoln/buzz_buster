@@ -1,4 +1,4 @@
-from logging_setup import logger
+from .logging_setup import logger
 from telegram import (
     Update,
 )
@@ -6,13 +6,13 @@ from telegram.error import BadRequest
 from telegram.ext import (
     CallbackContext,
 )
-from formatting import display_chat, display_user
-from database import (
+from .formatting import display_chat, display_user
+from .database import (
     is_group_configured,
     configured_groups_cache,
 )
 import mysql.connector
-import config
+from .config import *
 
 
 async def start_command(update: Update, context: CallbackContext) -> None:
@@ -64,13 +64,13 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
     # Настройка группы
     try:
-        conn = mysql.connector.connect(**config.DB_CONFIG)
+        conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO `groups` (group_id) VALUES (%s)", (chat_id,))
         cursor.execute(
             "INSERT INTO `group_settings` (group_id, parameter, value) VALUES (%s, %s, %s)",
-            (chat_id, "instructions", config.INSTRUCTIONS_DEFAULT_TEXT),
+            (chat_id, "instructions", INSTRUCTIONS_DEFAULT_TEXT),
         )
         conn.commit()
     except mysql.connector.Error as err:
@@ -85,7 +85,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
     # Обновление кэша настроенных групп
     configured_groups_cache.append(
         {"group_id": chat_id, "settings": {
-            "instructions": config.INSTRUCTIONS_DEFAULT_TEXT}}
+            "instructions": INSTRUCTIONS_DEFAULT_TEXT}}
     )
 
     await update.message.reply_text(
@@ -168,16 +168,16 @@ async def set_command(update: Update, context: CallbackContext) -> None:
         logger.debug(f"Invalid parameter {parameter} used in /set.")
         return
 
-    if parameter == "instructions" and len(value) > config.INSTRUCTIONS_LENGTH_LIMIT:
+    if parameter == "instructions" and len(value) > INSTRUCTIONS_LENGTH_LIMIT:
         await update.message.reply_text(
             f"Значение для {parameter} превышает лимит длины в {
-                config.INSTRUCTIONS_LENGTH_LIMIT} символов."
+                INSTRUCTIONS_LENGTH_LIMIT} символов."
         )
         logger.debug(f"Value for {parameter} exceeds length limit.")
         return
 
     try:
-        conn = mysql.connector.connect(**config.DB_CONFIG)
+        conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO group_settings (group_id, parameter, value) VALUES (%s, %s, %s) "
