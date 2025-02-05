@@ -3,15 +3,20 @@ services:
   # Update this to the name of the service you want to work with in your docker-compose.yml file
   bot:
     volumes:
-      - ./bot/app:/workspace/app
-      - ./.vscode:/workspace/.vscode
-      - ./logs/bot.log:/workspace/app/buzzbuster.log
+      # Update this to wherever you want VS Code to mount the folder of your project
+      - ../bot/app:/workspace/app
+      - ../.vscode:/workspace/.vscode
+      - ../logs/bot.log:/workspace/app/buzzbuster.log
+      - ./tests:/workspace/tests
 
-    image: buzzbuster_bot
-    container_name: buzz_buster.bot
+    # Overrides default command so things don't shut down after the process ends.
+    command: sleep infinity
+ 
+    image: buzzbuster_dev
+    container_name: buzz_buster.dev.bot
     build:
-      context: .
-      dockerfile: ./Dockerfile      
+      context: ..
+      dockerfile: .devcontainer/Dockerfile      
 
     env_file:
       - .env
@@ -46,7 +51,7 @@ services:
 
   db:
     image: mysql:latest
-    container_name: buzz_buster.db
+    container_name: buzz_buster.dev.db
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-default_root_password}
       MYSQL_DATABASE: ${DB_NAME:-buzz_buster}
@@ -55,8 +60,6 @@ services:
     expose:
       - "3306"
     volumes:
-      - db_data:/var/lib/mysql
+      - ./database:/var/lib/mysql
     restart: unless-stopped
 
-volumes:
-  db_data:

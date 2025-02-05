@@ -1,6 +1,7 @@
-logs/bot.log
 .vscode/launch.json
 .env
 .dockerignore
 .vscode/settings.json
 .vscode/tasks.json
+.devcontainer/database
+*.log
