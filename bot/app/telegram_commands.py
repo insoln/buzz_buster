@@ -67,10 +67,13 @@ async def start_command(update: Update, context: CallbackContext) -> None:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO `groups` (group_id) VALUES (%s)", (chat_id,))
+            "INSERT INTO `groups` (group_id) VALUES (%s) ON DUPLICATE KEY UPDATE group_id=group_id",
+            (chat_id,)
+        )
         cursor.execute(
-            "INSERT INTO `group_settings` (group_id, parameter, value) VALUES (%s, %s, %s)",
-            (chat_id, "instructions", INSTRUCTIONS_DEFAULT_TEXT),
+            "INSERT INTO `group_settings` (group_id, parameter, value) VALUES (%s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE value=%s",
+            (chat_id, "instructions", INSTRUCTIONS_DEFAULT_TEXT, INSTRUCTIONS_DEFAULT_TEXT)
         )
         conn.commit()
     except mysql.connector.Error as err:

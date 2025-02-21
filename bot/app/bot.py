@@ -73,7 +73,11 @@ async def main():
 
     # Регистрация обработчиков сообщений
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1
+        MessageHandler(
+            (
+                filters.TEXT |
+                (filters.PHOTO & filters.Caption())
+            ) & ~filters.COMMAND, handle_message), group=1
     )
 
     # Регистрируем обработчик изменения членства себя в группе

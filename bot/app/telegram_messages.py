@@ -21,6 +21,7 @@ from .config import *
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Обработка входящих сообщений в настроенных группах."""
+    
     if not update.message:
         logger.debug("Received update without message.")
         return
@@ -30,7 +31,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     logger.debug(
         f"Handling message from user {display_user(user)} in chat {
-            display_chat(chat)} with text: {update.message.text}"
+            display_chat(chat)} with text: {update.message.text or update.message.caption}."
     )
 
     if chat.type == "private":
@@ -63,7 +64,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         try:
             logger.debug(f"Sending prompt to OpenAI for user {
                          display_user(user)}.")
-            is_spam = await check_openai_spam(update.message.text, instructions)
+            is_spam = await check_openai_spam(update.message.text or update.message.caption, instructions)
             if is_spam:
                 logger.info(
                     f"User {display_user(

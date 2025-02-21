@@ -5,25 +5,25 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install dependencies
-WORKDIR /app
+# Устанавливаем рабочую директорию как /workspace
+WORKDIR /workspace
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install debugpy for debugging
+# Устанавливаем debugpy
 RUN pip install debugpy
 
-# Copy the application code
-COPY . /app
+# Копируем код (учтите, что volume-монтирование в dev-контейнере его затрет)
+# COPY . /workspace
 
-# Expose the debug port
+# Открываем порт для отладки
 EXPOSE 5678
 
-# Creates a non-root user with an explicit UID and adds permission to access the /app folder
-# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
-RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
+# Создаем пользователя с UID 5678 и меняем владельца /workspace
+RUN adduser -u 5678 --disabled-password --gecos "" appuser && \
+    chown -R appuser /workspace
 USER appuser
 
-# Set the entrypoint with debug options
-# CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "/workspace/app/bot.py"]
+# Запускаем приложение как модуль
 CMD ["python", "-m", "app.bot"]
