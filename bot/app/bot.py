@@ -1,5 +1,11 @@
+if __name__ == "__main__" and __package__ is None:
+    from os import path
+    import sys
+    sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
+    __package__ = "workspace.app"
+
 import asyncio
-from .telegram_messages import (
+from app.telegram_messages import (
     handle_message
 )
 from .telegram_groupmembership import (

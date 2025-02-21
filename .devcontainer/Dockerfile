@@ -1,24 +1,29 @@
 # For more information, please refer to https://aka.ms/vscode-docker-python
-FROM python:alpine
+FROM python:3.12-slim
 
-# Keeps Python from generating .pyc files in the container
+# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
-
-# Turns off buffering for easier container logging
 ENV PYTHONUNBUFFERED=1
 
-RUN apk update
+# Install dependencies
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install git
-RUN apk add --no-cache git
+# Install debugpy for debugging
+RUN pip install debugpy
 
-# Install pip requirements
-COPY ../requirements.txt .
-RUN python -m pip install -r requirements.txt
+# Copy the application code
+COPY . /app
 
-# Install pip requirements for debug
-COPY .devcontainer/requirements.debug.txt .
-RUN python -m pip install -r requirements.debug.txt
+# Expose the debug port
+EXPOSE 5678
 
-# WORKDIR /app
-# COPY .. /app
+# Creates a non-root user with an explicit UID and adds permission to access the /app folder
+# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
+RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
+USER appuser
+
+# Set the entrypoint with debug options
+# CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "/workspace/app/bot.py"]
+CMD ["python", "-m", "app.bot"]
