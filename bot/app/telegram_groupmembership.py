@@ -22,6 +22,7 @@ from .database import (
 import mysql.connector
 from .config import *
 
+
 async def handle_my_chat_members(update: Update, context: CallbackContext) -> None:
     # Обработка добавления бота в группу либо получения статуса админа
     logger.debug(
@@ -188,8 +189,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             return
 
         suspicious_users_cache.add(member.user.id)
-        logger.debug(f"Added user {display_user(
-            member.user)} to suspicious users cache.")
+        logger.debug(f"Added user {display_user(member.user)} to suspicious users cache.")
 
         # Проверка на CAS бан
         is_cas_banned = await check_cas_ban(member.user.id)
@@ -197,9 +197,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             await context.bot.ban_chat_member(chat.id, member.user.id)
             spammers_cache.add(member.user.id)
             logger.info(
-                f"User {display_user(member.user)} is CAS banned and was removed from group {
-                    chat.id}."
-            )
+                f"User {display_user(member.user)} is CAS banned and was removed from group {display_chat(chat)}.")
         else:
             # Запись в базу данных
             try:
@@ -215,8 +213,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 )
                 conn.commit()
             except mysql.connector.Error as err:
-                logger.exception(f"Database error when adding new user {
-                                 member.user.id}: {err}")
+                logger.exception(f"Database error when adding new user {display_user(member.user)}: {err}")
             finally:
                 cursor.close()
                 conn.close()
