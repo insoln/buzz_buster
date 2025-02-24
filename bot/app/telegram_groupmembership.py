@@ -184,7 +184,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             await context.bot.ban_chat_member(chat.id, member.user.id)
             logger.info(
                 f"Automatically banned known spammer {
-                    display_user(member.user)} from group {chat.id}."
+                    display_user(member.user)} from group {display_chat(chat)}."
             )
             return
 
