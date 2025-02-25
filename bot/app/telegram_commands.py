@@ -1,4 +1,4 @@
-from .logging_setup import logger
+from .logging_setup import logger, current_update_id
 from telegram import (
     Update,
 )
@@ -17,10 +17,11 @@ from .config import *
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /start."""
+    current_update_id.set(update.update_id)
     chat = update.effective_chat
     user = update.effective_user
     logger.debug(
-        f"Handling /start command from user {display_user(user.id)} in chat {display_chat(chat.id)}"
+        f"Handling /start command from user {display_user(user)} in chat {display_chat(chat)}"
     )
 
     if chat.type == "private":
@@ -95,6 +96,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /help."""
+    current_update_id.set(update.update_id)
     chat = update.effective_chat
     user = update.effective_user
     logger.debug(
@@ -130,6 +132,7 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 async def set_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /set."""
+    current_update_id.set(update.update_id)
     chat = update.effective_chat
     user = update.effective_user
 
@@ -209,6 +212,7 @@ async def set_command(update: Update, context: CallbackContext) -> None:
 
 async def get_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /get."""
+    current_update_id.set(update.update_id)
     chat = update.effective_chat
     user = update.effective_user
     logger.debug(

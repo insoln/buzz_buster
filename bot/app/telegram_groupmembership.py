@@ -1,4 +1,4 @@
-from .logging_setup import logger
+from .logging_setup import logger, current_update_id
 from .antispam import check_cas_ban
 
 from telegram import (
@@ -25,6 +25,7 @@ from .config import *
 
 async def handle_my_chat_members(update: Update, context: CallbackContext) -> None:
     # Обработка добавления бота в группу либо получения статуса админа
+    current_update_id.set(update.update_id)
     logger.debug(
         f"Handling my group membership update in group {
             display_chat(update.my_chat_member.chat)}"
@@ -175,6 +176,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
 
 async def handle_other_chat_members(update: Update, context: CallbackContext) -> None:
     """Обработка добавления новых участников в группу."""
+    current_update_id.set(update.update_id)
     chat = update.effective_chat
     member = update.chat_member.new_chat_member
 

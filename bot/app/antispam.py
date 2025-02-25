@@ -15,7 +15,19 @@ async def check_cas_ban(user_id: int) -> bool:
                 data = await response.json()
                 return data.get("ok", False)
     except Exception as e:
-        logger.exception(f"Error checking CAS ban for user {user_id}: {e}")
+        logger.exception(f"Error checking CAS for user_id {user_id}: {e}")
+        return False
+    
+async def check_lols_ban(user_id: int) -> dict:
+    """Проверка пользователя по базе lols.bot."""
+    url = f"https://lols.bot/account?id={user_id}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                data = await response.json()
+                return data.get("ok", False)
+    except Exception as e:
+        logger.exception(f"Error checking lols.bot for user_id {user_id}: {e}")
         return False
 
 

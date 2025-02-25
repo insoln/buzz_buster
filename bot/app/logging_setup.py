@@ -5,7 +5,15 @@ import logging.handlers
 from .config import *
 import asyncio
 from telegram import Bot
+from contextvars import ContextVar
 
+current_update_id = ContextVar('current_update_id', default=None)
+
+class UpdateIDFilter(logging.Filter):
+    def filter(self, record):
+        update_id = current_update_id.get()
+        record.update_id = update_id if update_id is not None else '__main__'
+        return True
 
 class TelegramLogHandler(logging.Handler):
     """Класс для отправки логов в Telegram."""
@@ -30,22 +38,25 @@ logger = logging.getLogger("telegram_bot")
 logger.setLevel(logging.DEBUG)
 
 # Форматтеры для логирования
-log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-simple_formatter = logging.Formatter("%(message)s")
+console_formatter = logging.Formatter('%(update_id)s %(asctime)s - %(levelname)s (%(filename)s:%(lineno)d): %(message)s')
+file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+telegram_formatter = logging.Formatter("%(message)s")
 
 # Логирование в файл
 file_handler = logging.handlers.RotatingFileHandler(
     "/workspace/app/buzzbuster.log", maxBytes=5 * 1024 * 1024, backupCount=2
 )
 file_handler.setLevel(getattr(logging, FILE_LOG_LEVEL, logging.INFO))
-file_handler.setFormatter(log_formatter)
+file_handler.setFormatter(file_formatter)
 logger.addHandler(file_handler)
+logger.addFilter(UpdateIDFilter())
+
 
 # Логирование в консоль
 console_handler = logging.StreamHandler()
 console_handler.setLevel(
     getattr(logging, CONSOLE_LOG_LEVEL, logging.INFO))
-console_handler.setFormatter(log_formatter)
+console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
 
@@ -61,5 +72,5 @@ bot = Bot(token=TELEGRAM_API_KEY)
 if STATUSCHAT_TELEGRAM_ID:
     telegram_handler = TelegramLogHandler(bot, STATUSCHAT_TELEGRAM_ID)
     telegram_handler.setLevel(getLoggingLevelByName(TELEGRAM_LOG_LEVEL))
-    telegram_handler.setFormatter(simple_formatter)
+    telegram_handler.setFormatter(telegram_formatter)
     logger.addHandler(telegram_handler)

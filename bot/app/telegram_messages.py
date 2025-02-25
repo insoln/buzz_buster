@@ -1,4 +1,4 @@
-from .logging_setup import logger
+from .logging_setup import logger,current_update_id
 from .antispam import check_openai_spam
 
 from telegram import (
@@ -21,7 +21,8 @@ from .config import *
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Обработка входящих сообщений в настроенных группах."""
-    
+    current_update_id.set(update.update_id)
+
     if not update.message:
         logger.debug("Received update without message.")
         return
@@ -62,13 +63,11 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         instructions = group_settings.get(
             "instructions", INSTRUCTIONS_DEFAULT_TEXT)
         try:
-            logger.debug(f"Sending prompt to OpenAI for user {
-                         display_user(user)}.")
+            logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
             is_spam = await check_openai_spam(update.message.text or update.message.caption, instructions)
             if is_spam:
                 logger.info(
-                    f"User {display_user(
-                        user)} is identified as spammer, it will be banned in all groups."
+                    f"Message from {display_user(user)} is identified as spam, user will be banned in all groups."
                 )
                 await context.bot.ban_chat_member(chat.id, user.id)
                 await update.message.delete()
