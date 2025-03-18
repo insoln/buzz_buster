@@ -54,17 +54,29 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         return
 
     if user.id in suspicious_users_cache:
-        # Получаем настройки группы
-        group_settings = next(
-            (group["settings"]
-             for group in configured_groups_cache if group["group_id"] == chat.id),
-            {},
-        )
-        instructions = group_settings.get(
-            "instructions", INSTRUCTIONS_DEFAULT_TEXT)
+        is_spam=False
+        
+        # forward
+        if not is_spam:
+            if update.message.forward_origin:
+                is_spam = True     
+        
+        # OpenAI
+        if not is_spam:
+            try:
+                group_settings = next(
+                    (group["settings"]
+                    for group in configured_groups_cache if group["group_id"] == chat.id),
+                    {},
+                )        
+                instructions = group_settings.get("instructions", INSTRUCTIONS_DEFAULT_TEXT)
+                logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
+                is_spam = await check_openai_spam(update.message.text or update.message.caption, instructions)
+            except Exception as e:
+                logger.exception(
+                    f"Error querying OpenAI for message processing: {e}")                
+    
         try:
-            logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
-            is_spam = await check_openai_spam(update.message.text or update.message.caption, instructions)
             if is_spam:
                 logger.info(
                     f"Message from {display_user(user)} is identified as spam, user will be banned in all groups."
@@ -116,10 +128,10 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     conn.close()
 
                 logger.info(
-                    f"Message from user {display_user(user)} is not spam."
+                    f"Message from user {display_user(user)} is not spam. User is no longer suspicious."
                 )
         except Exception as e:
             logger.exception(
-                f"Error querying OpenAI for message processing: {e}")
+                f"Error processing message from user {display_user(user)}: {e}")
     else:
-        logger.debug(f"User {display_user(user)} is not in suspicious users cache.")
+        logger.debug(f"User {display_user(user)} is not in suspicious users cache. Message will be processed normally.")

@@ -13,9 +13,7 @@ from .telegram_groupmembership import (
     handle_other_chat_members
 )
 from .telegram_commands import (
-    get_command,
     help_command,
-    set_command,
     start_command
 )
 from .logging_setup import logger
@@ -68,8 +66,6 @@ async def main():
     # Регистрация обработчиков команд
     application.add_handler(CommandHandler("start", start_command), group=1)
     application.add_handler(CommandHandler("help", help_command), group=1)
-    application.add_handler(CommandHandler("set", set_command), group=1)
-    application.add_handler(CommandHandler("get", get_command), group=1)
 
     # Регистрация обработчиков сообщений
     application.add_handler(

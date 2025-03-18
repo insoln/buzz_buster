@@ -35,7 +35,6 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
     if member.user.id == context.bot.id:
         if isinstance(member, ChatMemberAdministrator):
             # Бот получил права администратора
-
             if update.my_chat_member.chat.type == "channel":
                 # Бот добавлен в канал
                 try:
@@ -52,7 +51,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                         {"group_id": chat_id, "settings": {}})
                     logger.info(
                         f"Channel {display_chat(update.my_chat_member.chat)} added to configured groups cache and database by user {
-                            display_user(update.my_chat_member.from_user)})."
+                            display_user(update.my_chat_member.from_user)}."
                     )
                 except mysql.connector.Error as err:
                     logger.error(
@@ -70,7 +69,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                 try:
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text="I have been promoted to an administrator. I am ready to protect your group from spam! Use /start to configure me.",
+                        text="I have been promoted to an administrator. I am ready to protect your group from spam!",
                     )
                 except BadRequest as e:
                     if "not enough rights to send text messages" in str(e):
