@@ -61,49 +61,29 @@ prompt = [
 ]
 ```
 
-### 2. Improved Default Instructions (`bot/app/config.py`)
+### 2. Instructions Management Fix
 
-**Before (lines 10-12):**
-```python
-INSTRUCTIONS_DEFAULT_TEXT = os.getenv(
-    "INSTRUCTIONS_DEFAULT_TEXT", "Любые спам-признаки."
-)
-```
+**Issue Discovered:** The original changes modified `INSTRUCTIONS_DEFAULT_TEXT` in config.py, but existing groups store their instructions in the database and don't automatically pick up config changes.
 
-**After (lines 10-27):**
-```python
-INSTRUCTIONS_DEFAULT_TEXT = os.getenv(
-    "INSTRUCTIONS_DEFAULT_TEXT", 
-    """1. **Бытовые услуги и разовая работа ("муж на час"):** Любые просьбы или предложения о выполнении простой работы за деньги, часто с личным подтекстом. Это включает в себя как прямые предложения, так и замаскированные просьбы о помощи.
-       *Примеры:* 'ищу мужа на час, заплачу 5000', 'нужны люди перенести кирпичи', 'помогите убрать мусор, заплачу', 'починить кран, пишите в личку'.
+**Solution:** 
+- Reverted config.py changes to maintain backward compatibility
+- Created `update_instructions.py` utility script to update database instructions for existing groups
+- Updated README.md with instructions for updating existing groups
 
-2. **Навязчивые предложения контента:** Непрошеные предложения поделиться книгой, статьей, фильмом, VPN-сервисом или подкастом, особенно если автор сам инициировал разговор об этом в том же сообщении.
-   *Примеры:* 'прочитал книгу... если интересно, могу скинуть', 'попробуй vpn_bot в телеграме'.
+### 3. Database Instructions Update Utility (`update_instructions.py`)
 
-3. **Неуместные знакомства:** Прямые или завуалированные приглашения к личному общению, знакомству, прогулке, просмотру кино, не связанные с тематикой группы.
-   *Примеры:* 'кто хочет прогуляться?', 'приглашу в гости для встречи', 'ищу с кем пообщаться'.
+New utility script that:
+- Reads instructions from `INSTRUCTIONS_DEFAULT_TEXT` environment variable
+- Updates all configured groups in the database with new instructions
+- Provides verification and confirmation prompts
+- Includes `--show` option to display current configuration
 
-4. **Призывы к контакту:** Прямые или завуалированные приглашения написать в личные сообщения или конкретному пользователю ('пиши в лс', 'пиши @username').
+### 4. Updated Documentation (`README.md`)
 
-5. **Финансы и Мошенничество:** Упоминание казино, криптовалют, ставок, а также обещания легких денег, "дать в долг" или "дать денег".
-   *Примеры:* 'Занос с додепа...', 'дам денег', 'есть тема от 20к в день'.
-
-6. **Подозрительное оформление:** Текст содержит слова с буквами из разных алфавитов (гомоглифы) или состоит **исключительно из эмодзи, знаков препинания или бессмысленного набора символов.**
-
-7. **Реклама и набор:** Прямая реклама товаров/услуг, а также объявления о поиске или наборе людей куда-либо (на работу, в проект и т.д.).
-   *Пример:* 'ищу партнеров в направление', 'открыт набор сотрудников'."""
-)
-```
-
-### 3. Updated `.gitignore`
-Added Python cache files and test artifacts:
-```
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-```
+Added section on updating spam criteria for existing groups:
+- How to update `INSTRUCTIONS_DEFAULT_TEXT` in .env
+- How to run the update script
+- Warnings about overriding custom group settings
 
 ## Key Improvements
 
