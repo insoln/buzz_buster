@@ -17,7 +17,8 @@ from .formatting import display_chat, display_user
 from .database import (
     configured_groups_cache,
     spammers_cache,
-    is_user_spammer_in_group
+    is_user_spammer_in_group,
+    is_user_spammer_anywhere
 )
 import mysql.connector
 from .config import *
@@ -181,11 +182,36 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
 
     # Проверяем, снова ли пользователь вошёл в группу
     if member.status == ChatMemberStatus.MEMBER:
-        # Проверка: если пользователь спамер в этой группе - банить
-        if is_user_spammer_in_group(member.user.id, chat.id):
+        # Проверка: если пользователь спамер в любой группе - банить
+        if is_user_spammer_anywhere(member.user.id):
             await context.bot.ban_chat_member(chat.id, member.user.id)
+            
+            # Добавить в кеш спамеров для этой группы
+            if member.user.id not in spammers_cache:
+                spammers_cache[member.user.id] = set()
+            spammers_cache[member.user.id].add(chat.id)
+            
+            # Обновить базу данных
+            try:
+                conn = mysql.connector.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO user_entries (user_id, group_id, join_date, spammer)
+                    VALUES (%s, %s, NOW(), TRUE)
+                    ON DUPLICATE KEY UPDATE spammer = TRUE
+                    """,
+                    (member.user.id, chat.id),
+                )
+                conn.commit()
+            except mysql.connector.Error as err:
+                logger.exception(f"Database error when marking cross-group spammer: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+            
             logger.info(
-                f"Automatically banned known spammer {
+                f"Automatically banned known cross-group spammer {
                     display_user(member.user)} from group {display_chat(chat)}."
             )
             return
