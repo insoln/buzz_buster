@@ -1,4 +1,4 @@
-"""Test suspicious user status persistence across service restarts."""
+"""Test trust-based system and per-group spammer persistence across service restarts."""
 import pytest
 import sys
 import os
@@ -10,8 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../bot'))
 from app.database import (
     check_and_create_tables,
     load_user_caches, 
-    suspicious_users_cache,
-    spammers_cache
+    spammers_cache,
+    is_user_trusted,
+    is_user_spammer_anywhere,
+    is_user_spammer_in_group
 )
 from app.config import DB_CONFIG
 import mysql.connector
@@ -63,12 +65,18 @@ def cleanup_test_data(test_db_config, user_id):
         conn.commit()
         cursor.close()
         conn.close()
+        
+        # Also clear from cache if present
+        global spammers_cache
+        if user_id in spammers_cache:
+            del spammers_cache[user_id]
+            
     except mysql.connector.Error:
         pass  # Ignore cleanup errors
 
 
-def test_suspicious_user_persistence_across_restarts(test_db_config):
-    """Test that suspicious user status is preserved across service restarts."""
+def test_trusted_user_status_across_restarts(test_db_config):
+    """Test that trusted user status works correctly across service restarts."""
     
     setup_test_database(test_db_config)
     
@@ -76,16 +84,16 @@ def test_suspicious_user_persistence_across_restarts(test_db_config):
     test_group_id = 67890
     
     try:
-        # Simulate adding a suspicious user to database (like when user joins group)
+        # Simulate adding a trusted user to database (user who sent a message)
         with patch('app.database.DB_CONFIG', test_db_config):
             conn = mysql.connector.connect(**test_db_config)
             cursor = conn.cursor()
             
-            # Insert user as suspicious (simulating user joining group)
+            # Insert user as trusted (simulating user who sent a good message)
             cursor.execute(
                 """
-                INSERT INTO user_entries (user_id, group_id, join_date, suspicious, seen_message, spammer)
-                VALUES (%s, %s, NOW(), TRUE, FALSE, FALSE)
+                INSERT INTO user_entries (user_id, group_id, join_date, seen_message, spammer)
+                VALUES (%s, %s, NOW(), TRUE, FALSE)
                 """,
                 (test_user_id, test_group_id)
             )
@@ -93,19 +101,16 @@ def test_suspicious_user_persistence_across_restarts(test_db_config):
             cursor.close()
             conn.close()
             
-            # Simulate service restart - reload caches from database
-            load_user_caches()
-            
-            # Verify that the user is loaded as suspicious
-            assert test_user_id in suspicious_users_cache, f"User {test_user_id} should be in suspicious cache after restart"
-            assert test_user_id not in spammers_cache, f"User {test_user_id} should not be in spammers cache"
+            # Verify that the user is trusted
+            assert is_user_trusted(test_user_id), f"User {test_user_id} should be trusted"
+            assert not is_user_spammer_anywhere(test_user_id), f"User {test_user_id} should not be a spammer"
             
     finally:
         cleanup_test_data(test_db_config, test_user_id)
 
 
-def test_suspicious_user_cleared_after_good_message(test_db_config):
-    """Test that suspicious status is cleared when user sends a good message."""
+def test_unknown_user_becomes_trusted_after_good_message(test_db_config):
+    """Test that unknown users become trusted when they send good messages."""
     
     setup_test_database(test_db_config)
     
@@ -114,68 +119,103 @@ def test_suspicious_user_cleared_after_good_message(test_db_config):
     
     try:
         with patch('app.database.DB_CONFIG', test_db_config):
+            # Initially, user is not in database (unknown user)
+            assert not is_user_trusted(test_user_id), f"User {test_user_id} should not be trusted initially"
+            assert not is_user_spammer_anywhere(test_user_id), f"User {test_user_id} should not be a spammer initially"
+            
             conn = mysql.connector.connect(**test_db_config)
             cursor = conn.cursor()
             
-            # Insert user as suspicious
+            # Simulate user sending a good message (becomes trusted)
             cursor.execute(
                 """
-                INSERT INTO user_entries (user_id, group_id, join_date, suspicious, seen_message, spammer)
-                VALUES (%s, %s, NOW(), TRUE, FALSE, FALSE)
+                INSERT INTO user_entries (user_id, group_id, join_date, seen_message, spammer)
+                VALUES (%s, %s, NOW(), TRUE, FALSE)
                 """,
                 (test_user_id, test_group_id)
-            )
-            conn.commit()
-            
-            # Simulate user sending a good message (not spam)
-            cursor.execute(
-                """
-                UPDATE user_entries SET seen_message = TRUE, spammer = FALSE, suspicious = FALSE WHERE user_id = %s
-                """,
-                (test_user_id,)
             )
             conn.commit()
             cursor.close()
             conn.close()
             
-            # Simulate service restart - reload caches from database
-            load_user_caches()
-            
-            # Verify that the user is no longer suspicious
-            assert test_user_id not in suspicious_users_cache, f"User {test_user_id} should not be in suspicious cache after good message"
-            assert test_user_id not in spammers_cache, f"User {test_user_id} should not be in spammers cache"
+            # Verify that the user is now trusted
+            assert is_user_trusted(test_user_id), f"User {test_user_id} should be trusted after good message"
+            assert not is_user_spammer_anywhere(test_user_id), f"User {test_user_id} should not be a spammer"
             
     finally:
         cleanup_test_data(test_db_config, test_user_id)
 
 
-def test_spammer_marked_correctly(test_db_config):
-    """Test that users marked as spammers are handled correctly."""
+def test_per_group_spammer_tracking(test_db_config):
+    """Test that per-group spammer tracking works correctly across restarts."""
     
     setup_test_database(test_db_config)
     
     test_user_id = 12347
-    test_group_id = 67892
+    test_group_id_1 = 67892
+    test_group_id_2 = 67893
     
     try:
         with patch('app.database.DB_CONFIG', test_db_config):
             conn = mysql.connector.connect(**test_db_config)
             cursor = conn.cursor()
             
-            # Insert user as suspicious initially
+            # Insert user as spammer in group 1
             cursor.execute(
                 """
-                INSERT INTO user_entries (user_id, group_id, join_date, suspicious, seen_message, spammer)
-                VALUES (%s, %s, NOW(), TRUE, FALSE, FALSE)
+                INSERT INTO user_entries (user_id, group_id, join_date, seen_message, spammer)
+                VALUES (%s, %s, NOW(), FALSE, TRUE)
                 """,
-                (test_user_id, test_group_id)
+                (test_user_id, test_group_id_1)
+            )
+            
+            # Insert user as non-spammer in group 2  
+            cursor.execute(
+                """
+                INSERT INTO user_entries (user_id, group_id, join_date, seen_message, spammer)
+                VALUES (%s, %s, NOW(), TRUE, FALSE)
+                """,
+                (test_user_id, test_group_id_2)
             )
             conn.commit()
+            cursor.close()
+            conn.close()
             
-            # Simulate user being marked as spammer
+            # Simulate service restart - reload caches from database
+            load_user_caches()
+            
+            # Verify per-group spammer status
+            assert is_user_spammer_anywhere(test_user_id), f"User {test_user_id} should be a spammer anywhere"
+            assert is_user_spammer_in_group(test_user_id, test_group_id_1), f"User {test_user_id} should be spammer in group {test_group_id_1}"
+            assert not is_user_spammer_in_group(test_user_id, test_group_id_2), f"User {test_user_id} should not be spammer in group {test_group_id_2}"
+            
+            # Verify cache structure
+            assert test_user_id in spammers_cache, f"User {test_user_id} should be in spammers cache"
+            assert test_group_id_1 in spammers_cache[test_user_id], f"Group {test_group_id_1} should be in user's spammer groups"
+            assert test_group_id_2 not in spammers_cache[test_user_id], f"Group {test_group_id_2} should not be in user's spammer groups"
+            
+    finally:
+        cleanup_test_data(test_db_config, test_user_id)
+
+
+def test_cross_group_spammer_detection(test_db_config):
+    """Test that cross-group spammer detection works correctly."""
+    
+    setup_test_database(test_db_config)
+    
+    test_user_id = 12348
+    test_group_id = 67894
+    
+    try:
+        with patch('app.database.DB_CONFIG', test_db_config):
+            conn = mysql.connector.connect(**test_db_config)
+            cursor = conn.cursor()
+            
+            # Insert user as spammer in one group
             cursor.execute(
                 """
-                UPDATE user_entries SET spammer = TRUE, suspicious = FALSE where user_id=%s and group_id = %s
+                INSERT INTO user_entries (user_id, group_id, join_date, seen_message, spammer)
+                VALUES (%s, %s, NOW(), FALSE, TRUE)
                 """,
                 (test_user_id, test_group_id)
             )
@@ -186,9 +226,8 @@ def test_spammer_marked_correctly(test_db_config):
             # Simulate service restart - reload caches from database
             load_user_caches()
             
-            # Verify that the user is now in spammers cache and not suspicious
-            assert test_user_id in spammers_cache, f"User {test_user_id} should be in spammers cache"
-            assert test_user_id not in suspicious_users_cache, f"User {test_user_id} should not be in suspicious cache after being marked as spammer"
+            # Verify that user is detected as spammer anywhere
+            assert is_user_spammer_anywhere(test_user_id), f"User {test_user_id} should be detected as spammer anywhere"
             
     finally:
         cleanup_test_data(test_db_config, test_user_id)
