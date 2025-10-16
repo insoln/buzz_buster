@@ -17,7 +17,8 @@ from .formatting import display_chat, display_user
 from .database import (
     configured_groups_cache,
     spammers_cache,
-    suspicious_users_cache
+    is_user_spammer_in_group,
+    is_user_spammer_anywhere
 )
 import mysql.connector
 from .config import *
@@ -181,26 +182,75 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
 
     # Проверяем, снова ли пользователь вошёл в группу
     if member.status == ChatMemberStatus.MEMBER:
-        if member.user.id in spammers_cache:
+        # Проверка: если пользователь спамер в любой группе - банить
+        if is_user_spammer_anywhere(member.user.id):
             await context.bot.ban_chat_member(chat.id, member.user.id)
+            
+            # Добавить в кеш спамеров для этой группы
+            if member.user.id not in spammers_cache:
+                spammers_cache[member.user.id] = set()
+            spammers_cache[member.user.id].add(chat.id)
+            
+            # Обновить базу данных
+            try:
+                conn = mysql.connector.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO user_entries (user_id, group_id, join_date, spammer)
+                    VALUES (%s, %s, NOW(), TRUE)
+                    ON DUPLICATE KEY UPDATE spammer = TRUE
+                    """,
+                    (member.user.id, chat.id),
+                )
+                conn.commit()
+            except mysql.connector.Error as err:
+                logger.exception(f"Database error when marking cross-group spammer: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+            
             logger.info(
-                f"Automatically banned known spammer {
+                f"Automatically banned known cross-group spammer {
                     display_user(member.user)} from group {display_chat(chat)}."
             )
             return
 
-        suspicious_users_cache.add(member.user.id)
-        logger.debug(f"Added user {display_user(member.user)} to suspicious users cache.")
+        logger.debug(f"User {display_user(member.user)} joined group {display_chat(chat)}.")
 
         # Проверка на CAS бан
         is_cas_banned = await check_cas_ban(member.user.id)
         if is_cas_banned:
             await context.bot.ban_chat_member(chat.id, member.user.id)
-            spammers_cache.add(member.user.id)
+            
+            # Добавить в кеш спамеров для этой группы
+            if member.user.id not in spammers_cache:
+                spammers_cache[member.user.id] = set()
+            spammers_cache[member.user.id].add(chat.id)
+            
             logger.info(
                 f"User {display_user(member.user)} is CAS banned and was removed from group {display_chat(chat)}.")
+                
+            # Записать в базу данных как спамера
+            try:
+                conn = mysql.connector.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO user_entries (user_id, group_id, join_date, spammer)
+                    VALUES (%s, %s, NOW(), TRUE)
+                    ON DUPLICATE KEY UPDATE spammer = TRUE
+                    """,
+                    (member.user.id, chat.id),
+                )
+                conn.commit()
+            except mysql.connector.Error as err:
+                logger.exception(f"Database error when adding CAS banned user {display_user(member.user)}: {err}")
+            finally:
+                cursor.close()
+                conn.close()
         else:
-            # Запись в базу данных
+            # Обычное присоединение - создать запись в базе, но не как спамера
             try:
                 conn = mysql.connector.connect(**DB_CONFIG)
                 cursor = conn.cursor()
@@ -224,6 +274,38 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 display_chat(chat)}."
         )
     else:
+        # Проверяем разбан пользователя (изменение статуса с banned на member)
+        old_member = update.chat_member.old_chat_member
+        if (old_member.status == ChatMemberStatus.BANNED and 
+            member.status == ChatMemberStatus.MEMBER):
+            # Пользователь был разбанен админом - снимаем флаг спамера в этой группе
+            if is_user_spammer_in_group(member.user.id, chat.id):
+                # Удалить из кеша спамеров для этой группы
+                if member.user.id in spammers_cache:
+                    spammers_cache[member.user.id].discard(chat.id)
+                    if len(spammers_cache[member.user.id]) == 0:
+                        del spammers_cache[member.user.id]
+                
+                # Обновить базу данных
+                try:
+                    conn = mysql.connector.connect(**DB_CONFIG)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        UPDATE user_entries SET spammer = FALSE WHERE user_id = %s AND group_id = %s
+                        """,
+                        (member.user.id, chat.id),
+                    )
+                    conn.commit()
+                    logger.info(
+                        f"User {display_user(member.user)} was unbanned by admin in group {display_chat(chat)}. Removed spammer flag for this group."
+                    )
+                except mysql.connector.Error as err:
+                    logger.exception(f"Database error when removing spammer flag: {err}")
+                finally:
+                    cursor.close()
+                    conn.close()
+        
         logger.debug(
             f"Received chat_member update for user {display_user(member.user)} in chat {
                 display_chat(chat)}."
