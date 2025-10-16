@@ -92,7 +92,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     cursor = conn.cursor()
                     cursor.execute(
                         """
-                        UPDATE `user_entries` set spammer = TRUE where user_id=%s and group_id = %s
+                        UPDATE `user_entries` set spammer = TRUE, suspicious = FALSE where user_id=%s and group_id = %s
                         """,
                         (user.id, chat.id),
                     )
@@ -115,7 +115,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     cursor = conn.cursor()
                     cursor.execute(
                         """
-                        UPDATE user_entries SET seen_message = TRUE, spammer = FALSE WHERE user_id = %s
+                        UPDATE user_entries SET seen_message = TRUE, spammer = FALSE, suspicious = FALSE WHERE user_id = %s
                         """,
                         (user.id,),
                     )

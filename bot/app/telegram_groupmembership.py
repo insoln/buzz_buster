@@ -206,9 +206,9 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    INSERT INTO user_entries (user_id, group_id, join_date)
-                    VALUES (%s, %s, NOW())
-                    ON DUPLICATE KEY UPDATE join_date=NOW()
+                    INSERT INTO user_entries (user_id, group_id, join_date, suspicious)
+                    VALUES (%s, %s, NOW(), TRUE)
+                    ON DUPLICATE KEY UPDATE join_date=NOW(), suspicious=TRUE
                     """,
                     (member.user.id, chat.id),
                 )

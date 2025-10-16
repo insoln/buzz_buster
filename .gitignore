@@ -5,3 +5,5 @@
 .vscode/tasks.json
 .devcontainer/database
 *.log
+__pycache__/
+.pytest_cache/

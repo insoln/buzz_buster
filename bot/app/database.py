@@ -41,10 +41,25 @@ def check_and_create_tables():
             group_id BIGINT NOT NULL,
             join_date DATETIME NOT NULL,
             seen_message BOOLEAN DEFAULT FALSE,
-            spammer BOOLEAN DEFAULT FALSE
+            spammer BOOLEAN DEFAULT FALSE,
+            suspicious BOOLEAN DEFAULT FALSE
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
         """
         )
+        
+        # Add suspicious column if it doesn't exist (migration)
+        try:
+            cursor.execute(
+                """
+                ALTER TABLE user_entries 
+                ADD COLUMN suspicious BOOLEAN DEFAULT FALSE
+            """
+            )
+        except mysql.connector.Error as err:
+            # Column may already exist, which is fine
+            if "Duplicate column name" not in str(err):
+                logger.warning(f"Could not add suspicious column: {err}")
+        
         conn.commit()
     except mysql.connector.Error as err:
         logger.critical(f"Database error while checking and creating tables: {err}.")
@@ -121,7 +136,7 @@ def load_user_caches():
         cursor.execute(
             """
             SELECT user_id FROM user_entries 
-            WHERE seen_message = FALSE
+            WHERE suspicious = TRUE OR (seen_message = FALSE AND spammer = FALSE)
         """
         )
         suspicious_users_cache = {row[0] for row in cursor.fetchall()}
