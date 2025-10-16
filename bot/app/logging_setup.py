@@ -2,7 +2,6 @@
 
 import logging
 import logging.handlers
-import os
 from .config import *
 import asyncio
 from telegram import Bot
@@ -44,12 +43,8 @@ file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 telegram_formatter = logging.Formatter("%(message)s")
 
 # Логирование в файл
-log_path = "/workspace/app/buzzbuster.log"
-if not os.path.exists(os.path.dirname(log_path)):
-    log_path = "/tmp/buzzbuster.log"
-
 file_handler = logging.handlers.RotatingFileHandler(
-    log_path, maxBytes=5 * 1024 * 1024, backupCount=2
+    "/workspace/app/buzzbuster.log", maxBytes=5 * 1024 * 1024, backupCount=2
 )
 file_handler.setLevel(getattr(logging, FILE_LOG_LEVEL, logging.INFO))
 file_handler.setFormatter(file_formatter)

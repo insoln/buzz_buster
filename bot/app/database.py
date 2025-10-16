@@ -5,8 +5,8 @@ import mysql.connector
 
 # Глобальные переменные для кэширования данных
 configured_groups_cache = []
-suspicious_users_cache = set()
-spammers_cache = set()
+# spammers_cache теперь хранит словарь: {user_id: set(group_ids_where_banned)}
+spammers_cache = {}
 
 def check_and_create_tables():
     """Проверка и создание необходимых таблиц в базе данных."""
@@ -41,25 +41,10 @@ def check_and_create_tables():
             group_id BIGINT NOT NULL,
             join_date DATETIME NOT NULL,
             seen_message BOOLEAN DEFAULT FALSE,
-            spammer BOOLEAN DEFAULT FALSE,
-            suspicious BOOLEAN DEFAULT FALSE
+            spammer BOOLEAN DEFAULT FALSE
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
         """
         )
-        
-        # Add suspicious column if it doesn't exist (migration)
-        try:
-            cursor.execute(
-                """
-                ALTER TABLE user_entries 
-                ADD COLUMN suspicious BOOLEAN DEFAULT FALSE
-            """
-            )
-        except mysql.connector.Error as err:
-            # Column may already exist, which is fine
-            if "Duplicate column name" not in str(err):
-                logger.warning(f"Could not add suspicious column: {err}")
-        
         conn.commit()
     except mysql.connector.Error as err:
         logger.critical(f"Database error while checking and creating tables: {err}.")
@@ -115,31 +100,25 @@ def load_configured_groups():
 
 def load_user_caches():
     """Загрузка кешей пользователей из базы данных."""
-    global suspicious_users_cache, spammers_cache
-    suspicious_users_cache = set()
-    spammers_cache = set()
+    global spammers_cache
+    spammers_cache = {}
     logger.debug("Loading user caches from the database.")
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        # Загрузка спамеров
+        # Загрузка спамеров по группам
         cursor.execute(
             """
-            SELECT user_id FROM user_entries 
+            SELECT user_id, group_id FROM user_entries 
             WHERE spammer = TRUE AND join_date >= NOW() - INTERVAL 30 DAY
         """
         )
-        spammers_cache = {row[0] for row in cursor.fetchall()}
+        for user_id, group_id in cursor.fetchall():
+            if user_id not in spammers_cache:
+                spammers_cache[user_id] = set()
+            spammers_cache[user_id].add(group_id)
 
-        # Загрузка подозрительных пользователей
-        cursor.execute(
-            """
-            SELECT user_id FROM user_entries 
-            WHERE suspicious = TRUE OR (seen_message = FALSE AND spammer = FALSE)
-        """
-        )
-        suspicious_users_cache = {row[0] for row in cursor.fetchall()}
     except mysql.connector.Error as err:
         logger.critical(f"Database error while loading user caches: {err}.")
         raise SystemExit("Database error.")
@@ -148,5 +127,37 @@ def load_user_caches():
         conn.close()
 
     logger.debug(
-        f"User caches loaded. Suspicious users: {len(suspicious_users_cache)}, Spammers: {len(spammers_cache)}"
+        f"User caches loaded. Spammers: {len(spammers_cache)} users across groups"
     )
+
+
+def is_user_trusted(user_id: int) -> bool:
+    """Проверка, является ли пользователь доверенным (имеет seen_message=TRUE в любой группе)."""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM user_entries 
+            WHERE user_id = %s AND seen_message = TRUE
+            """,
+            (user_id,)
+        )
+        count = cursor.fetchone()[0]
+        return count > 0
+    except mysql.connector.Error as err:
+        logger.exception(f"Database error checking if user {user_id} is trusted: {err}")
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def is_user_spammer_anywhere(user_id: int) -> bool:
+    """Проверка, является ли пользователь спамером в любой группе."""
+    return user_id in spammers_cache and len(spammers_cache[user_id]) > 0
+
+
+def is_user_spammer_in_group(user_id: int, group_id: int) -> bool:
+    """Проверка, является ли пользователь спамером в конкретной группе."""
+    return user_id in spammers_cache and group_id in spammers_cache[user_id]
