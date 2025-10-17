@@ -1,0 +1,15 @@
+[run]
+# Collect branch coverage for more precise metrics
+branch = True
+# Restrict to application source
+source = app
+# Write coverage data into tmp (writable in devcontainer)
+data_file = /tmp/.coverage
+
+[report]
+show_missing = True
+skip_covered = True
+
+[html]
+# If you later generate html: output dir
+directory = coverage_html
