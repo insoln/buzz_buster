@@ -3,6 +3,7 @@ from .logging_setup import logger
 import mysql.connector
 from .formatting import display_chat, display_user
 from typing import List, Optional, Tuple
+from telegram import Chat, Update
 
 
 # Глобальные переменные для кэширования данных
@@ -11,7 +12,7 @@ suspicious_users_cache = set()  # user_ids currently having at least one unseen 
 spammers_cache = set()  # user_ids having any spammer=TRUE entry
 seen_users_cache = set()  # user_ids having at least one seen_message=TRUE entry
 
-# Negative caches ("absence" memoization) to avoid повторных холостых запросов в БД.
+# Negative caches ("absence" memoization) to avoid repeated empty/unnecessary queries to the DB.
 # ВНИМАНИЕ: они инвалиируются при позитивных апдейтах (mark_spammer/mark_seen) и при очистке кэшей.
 not_spammers_cache = set()  # user_ids для которых подтверждено ОТСУТСТВИЕ spammer=TRUE записей
 not_seen_cache = set()      # user_ids для которых подтверждено отсутствие любых seen_message=TRUE записей
@@ -83,8 +84,7 @@ def is_group_configured(group_id: int) -> bool:
     """Проверка наличия группы в кэше настроенных групп."""
     return any(group["group_id"] == group_id for group in configured_groups_cache)
 
-async def add_configured_group(update):
-    chat = update.effective_chat
+async def add_configured_group(chat: Chat, update: Update):
     user = update.effective_user
     conn = None
     cursor = None
@@ -337,14 +337,7 @@ def mark_seen_in_group(user_id: int, group_id: int):
     seen_users_cache.add(user_id)
     not_seen_cache.discard(user_id)
     suspicious_users_cache.discard(user_id)
-    # Дополнительное гарантированное обновление ссылки (на случай если где-то удерживается старая ссылка)
-    if user_id not in seen_users_cache:
-        # rebind (хотя теоретически не нужно, но оставляем как страховку)
-        tmp = set(seen_users_cache)
-        tmp.add(user_id)
-        seen_users_cache = tmp  # type: ignore
-    if user_id in not_seen_cache:
-        not_seen_cache = {x for x in not_seen_cache if x != user_id}  # type: ignore
+
     conn = None
     cur = None
     success = False

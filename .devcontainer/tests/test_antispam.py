@@ -9,7 +9,7 @@ from app.config import INSTRUCTIONS_DEFAULT_TEXT
 def mock_external(monkeypatch):
     # Mock OpenAI chat completion
     class FakeChatCompletions:
-        def create(self, model, messages, response_format):  # type: ignore[override]
+        def create(self, model: str, messages, response_format=None, **kwargs):  # type: ignore[override]
             user_msg = next(m for m in messages if m["role"] == "user") if isinstance(messages, list) else messages[-1]
             # support both dict-like and object params
             content = getattr(user_msg, "content", "") if not isinstance(user_msg, dict) else user_msg.get("content", "")

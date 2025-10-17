@@ -193,9 +193,9 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
     # 1. Админ мог разбанить локального спамера (из KICKED/BANNED -> MEMBER)
     repo = get_user_state_repo()
     if old_member is not None:
-        prev_status = str(getattr(old_member, 'status', '')).lower()
-        new_status = str(getattr(member, 'status', '')).lower()
-        if prev_status in ("kicked", "banned") and new_status == "member":
+        prev_status = getattr(old_member, 'status', None)
+        new_status = getattr(member, 'status', None)
+        if prev_status in (ChatMemberStatus.KICKED, ChatMemberStatus.BANNED) and new_status == ChatMemberStatus.MEMBER:
             # Attempt to clear local/global spammer status.
             entry = repo.entry(member.user.id, chat.id)
             spammer_flag = False

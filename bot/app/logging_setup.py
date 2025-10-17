@@ -87,7 +87,8 @@ def log_event(action: str, **fields):
     action: строковый тип события (ban, mark_spammer, first_message_seen, join, unban, cas_ban,...)
     Остальные именованные параметры сериализуются. Ошибки сериализации не роняют выполнение.
     """
-    import json, time
+    import json
+    import time
     payload = {
         "ts": time.time(),
         "action": action,
