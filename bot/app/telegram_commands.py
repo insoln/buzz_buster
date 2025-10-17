@@ -1,4 +1,4 @@
-from .logging_setup import logger, current_update_id
+from .logging_setup import logger, current_update_id, with_update_id
 from telegram import (
     Update,
 )
@@ -22,9 +22,10 @@ except ImportError:
     SENTRY_AVAILABLE = False
 
 
+@with_update_id
 async def test_sentry_command(update: Update, context: CallbackContext) -> None:
     """Команда для тестирования Sentry интеграции (только для администраторов)."""
-    current_update_id.set(update.update_id)
+    # update_id set by decorator
     user = update.effective_user
 
     # Проверяем, что это администратор
@@ -67,9 +68,10 @@ async def test_sentry_command(update: Update, context: CallbackContext) -> None:
         logger.exception("Error during Sentry test")
 
 
+@with_update_id
 async def start_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /start."""
-    current_update_id.set(update.update_id)
+    # update_id set by decorator
     chat = update.effective_chat
     user = update.effective_user
     logger.debug(
@@ -121,18 +123,17 @@ async def start_command(update: Update, context: CallbackContext) -> None:
         return
 
     # Настройка группы
-    await add_configured_group(chat, update)
+    # Original helper expects 'update' object providing effective_chat/user, keep signature update first
+    await add_configured_group(update)
 
 
+@with_update_id
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /help."""
-    current_update_id.set(update.update_id)
+    # update_id set by decorator
     chat = update.effective_chat
     user = update.effective_user
-    logger.debug(
-        f"Handling /help command from user {display_user(user)} in chat {
-            display_chat(chat)}"
-    )
+    logger.debug(f"Handling /help command from user {display_user(user)} in chat {display_chat(chat)}")
 
     if chat.type == "private":
         await update.message.reply_text("Этот бот предназначен только для групп.")

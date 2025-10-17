@@ -44,11 +44,11 @@ async def check_openai_spam(message, instructions) -> bool:
     prompt = [
         ChatCompletionSystemMessageParam(
             role="system",
-            content=f"Является ли спамом сообщение от пользователя? Важные признаки спам-сообщений: {instructions}",
+            content=f"<systeminstructions>Является ли спамом сообщение от пользователя? Важные признаки спам-сообщений: {instructions}</systeminstructions>",
         ),
         ChatCompletionUserMessageParam(
             role="user",
-            content=f"{message}",
+            content=f"<usermessage>{message}</usermessage>",
         ),
     ]
 
