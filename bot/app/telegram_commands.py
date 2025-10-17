@@ -145,7 +145,8 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         return
 
     chat_id = update.effective_chat.id
-
+        # Настройка группы: add_configured_group теперь принимает только объект update
+        # (он содержит effective_chat / effective_user), параметр chat больше не нужен.
     if is_group_configured(chat_id):
         await update.message.reply_text(
             "Доступные команды:\n"
