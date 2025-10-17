@@ -103,7 +103,7 @@ ESSENTIAL_ACTIONS = {
     'ban_global_spammer', 'first_message_spam', 'first_message_ham',
     'new_user_spam', 'new_user_ham', 'late_suspicious_spam', 'late_suspicious_ham',
     'unban_clear_spammer', 'join_ban_known_spammer', 'cas_ban',
-    'inherit_trust', 'late_seen_upgrade'
+    'inherit_trust', 'late_seen_upgrade', 'admin_global_unban'
 }
 
 # Actions considered low-value (noise) will always be DEBUG (explicit list optional; fallback is debug anyway)
@@ -133,6 +133,9 @@ def _human_summary(action: str, payload: dict) -> str:
         if other:
             return f"Local unban for {user} in {chat}; still flagged in {other}."
         return f"Unban cleared global spam flag for {user}."
+    if action == 'admin_global_unban':
+        cleared = payload.get('cleared_groups', [])
+        return f"Admin globally unbanned user={payload.get('target_user_id')} from groups {cleared or '[]'}."
     if action == 'channel_configured':
         return f"Channel {chat} configured."
     if action == 'channel_config_error':

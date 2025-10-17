@@ -18,7 +18,7 @@ except ImportError:
     SENTRYSdkAvailable = False
 from app.telegram_messages import handle_message
 from .telegram_groupmembership import handle_my_chat_members, handle_other_chat_members
-from .telegram_commands import help_command, start_command, test_sentry_command
+from .telegram_commands import help_command, start_command, test_sentry_command, user_command, unban_command
 from .logging_setup import logger, with_update_id
 from .formatting import display_chat, display_user
 from .database import (
@@ -133,6 +133,8 @@ async def main():
     application.add_handler(CommandHandler("start", start_command), group=1)
     application.add_handler(CommandHandler("help", help_command), group=1)
     application.add_handler(CommandHandler("test_sentry", test_sentry_command), group=1)
+    application.add_handler(CommandHandler("user", user_command), group=1)
+    application.add_handler(CommandHandler("unban", unban_command), group=1)
 
     # Регистрация обработчиков сообщений
     application.add_handler(
