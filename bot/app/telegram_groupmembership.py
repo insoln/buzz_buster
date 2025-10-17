@@ -1,4 +1,4 @@
-from .logging_setup import logger, current_update_id
+from .logging_setup import logger, current_update_id, log_event
 from .antispam import check_cas_ban
 
 from telegram import (
@@ -190,12 +190,12 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
         logger.debug("No new_chat_member; skipping.")
         return
 
-    # 1. Админ мог разбанить локального спамера (из KICKED/BANNED -> MEMBER)
+    # 1. Админ мог разбанить локального спамера (из BANNED -> MEMBER)
     repo = get_user_state_repo()
     if old_member is not None:
-        prev_status = getattr(old_member, 'status', None)
-        new_status = getattr(member, 'status', None)
-        if prev_status in (ChatMemberStatus.KICKED, ChatMemberStatus.BANNED) and new_status == ChatMemberStatus.MEMBER:
+        prev_status = str(getattr(old_member, 'status', '')).lower()
+        new_status = str(getattr(member, 'status', '')).lower()
+        if prev_status in ("banned", "restricted") and new_status == "member":
             # Attempt to clear local/global spammer status.
             entry = repo.entry(member.user.id, chat.id)
             spammer_flag = False
@@ -231,7 +231,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                     await context.bot.send_message(chat.id, msg)
                 except Exception:
                     pass
-                logger.info(f"Cleared spammer flag for {display_user(member.user)} in {display_chat(chat)}. Others: {other_groups}")
+                log_event("unban_clear_spammer", user_id=member.user.id, chat_id=chat.id, other_groups=other_groups)
                 return
 
     # 2. Обычный join
@@ -245,18 +245,18 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 await context.bot.ban_chat_member(chat.id, uid)
             except Exception as e:
                 logger.exception(f"Failed to ban known spammer {display_user(member.user)} in {display_chat(chat)}: {e}")
-            logger.info(f"Auto-banned known spammer {display_user(member.user)} in {display_chat(chat)} on join.")
+            log_event("join_ban_known_spammer", user_id=member.user.id, chat_id=chat.id)
             return
 
         # b) Пользователь уже когда-то писал (seen в любой группе) -> создаём unseen запись (seen_message=FALSE), не добавляем в suspicious
         if repo.is_seen(uid):
             repo.mark_unseen(uid, chat.id)
-            logger.debug(f"User {display_user(member.user)} has seen elsewhere; created unseen record in {display_chat(chat)}.")
+            log_event("join_seen_elsewhere", user_id=member.user.id, chat_id=chat.id)
         else:
             # c) Совершенно новый глобально -> unseen + suspicious
             repo.mark_unseen(uid, chat.id)
             suspicious_users_cache.add(uid)
-            logger.debug(f"New global user {display_user(member.user)} marked suspicious in {display_chat(chat)}.")
+            log_event("join_new_suspicious", user_id=member.user.id, chat_id=chat.id)
 
         # d) CAS проверка
         try:
@@ -270,9 +270,9 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 await context.bot.ban_chat_member(chat.id, uid)
             except Exception:
                 pass
-            logger.info(f"CAS banned user {display_user(member.user)} removed from {display_chat(chat)}.")
+            log_event("cas_ban", user_id=member.user.id, chat_id=chat.id)
 
     elif member.status == ChatMemberStatus.LEFT:
-        logger.debug(f"User {display_user(member.user)} left {display_chat(chat)}.")
+        log_event("user_left", user_id=member.user.id, chat_id=chat.id)
     else:
-        logger.debug(f"Chat member update for {display_user(member.user)} in {display_chat(chat)} status={member.status}.")
+        log_event("chat_member_update", user_id=member.user.id, chat_id=chat.id, status=member.status)

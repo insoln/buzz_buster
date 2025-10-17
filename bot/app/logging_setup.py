@@ -87,8 +87,7 @@ def log_event(action: str, **fields):
     action: строковый тип события (ban, mark_spammer, first_message_seen, join, unban, cas_ban,...)
     Остальные именованные параметры сериализуются. Ошибки сериализации не роняют выполнение.
     """
-    import json
-    import time
+    import json, time
     payload = {
         "ts": time.time(),
         "action": action,
@@ -121,7 +120,7 @@ def getLoggingLevelByName(level: str) -> int:
     return getattr(logging, level.upper(), logging.WARNING)
 
 # Создаем экземпляр бота для отправки уведомлений (если токен задан)
-bot = Bot(token=TELEGRAM_API_KEY) if TELEGRAM_API_KEY and TELEGRAM_API_KEY.strip() else None
+bot = Bot(token=TELEGRAM_API_KEY) if TELEGRAM_API_KEY else None
 
 # Логирование в Telegram
 if STATUSCHAT_TELEGRAM_ID and bot is not None:

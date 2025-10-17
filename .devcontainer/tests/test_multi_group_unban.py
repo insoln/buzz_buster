@@ -34,13 +34,13 @@ async def test_global_flag_cleared_only_after_last_unban(monkeypatch):
     # Maintain per-group spam flags in memory
     spam_flags = {(999,100): True, (999,200): True}
     def fake_entry(uid, gid):
-        flag = spam_flags.get((uid, gid))
+        flag = spam_flags.get((uid,gid))
         if flag is None:
             return None
         return (False, flag)
-    repo.entry = lambda uid, gid: fake_entry(uid, gid)  # type: ignore
-    repo.clear_spammer = lambda uid, gid: spam_flags.__setitem__((uid, gid), False)  # type: ignore
-    repo.groups_with_spam_flag = lambda uid: [g for (u, g), flag in spam_flags.items() if u == uid and flag]  # type: ignore
+    repo.entry = lambda uid,gid: fake_entry(uid,gid)  # type: ignore
+    repo.clear_spammer = lambda uid,gid: spam_flags.__setitem__((uid,gid), False)  # type: ignore
+    repo.groups_with_spam_flag = lambda uid: [g for (u,g),flag in spam_flags.items() if u==uid and flag]  # type: ignore
 
     spammers_cache.add(999)
 

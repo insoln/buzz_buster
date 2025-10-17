@@ -3,7 +3,6 @@ from .logging_setup import logger
 import mysql.connector
 from .formatting import display_chat, display_user
 from typing import List, Optional, Tuple
-from telegram import Chat, Update
 
 
 # Глобальные переменные для кэширования данных
@@ -12,7 +11,7 @@ suspicious_users_cache = set()  # user_ids currently having at least one unseen 
 spammers_cache = set()  # user_ids having any spammer=TRUE entry
 seen_users_cache = set()  # user_ids having at least one seen_message=TRUE entry
 
-# Negative caches ("absence" memoization) to avoid repeated empty/unnecessary queries to the DB.
+# Negative caches ("absence" memoization) to avoid повторных холостых запросов в БД.
 # ВНИМАНИЕ: они инвалиируются при позитивных апдейтах (mark_spammer/mark_seen) и при очистке кэшей.
 not_spammers_cache = set()  # user_ids для которых подтверждено ОТСУТСТВИЕ spammer=TRUE записей
 not_seen_cache = set()      # user_ids для которых подтверждено отсутствие любых seen_message=TRUE записей
@@ -21,10 +20,6 @@ not_seen_cache = set()      # user_ids для которых подтвержд�
 # для функций user_has_spammer_anywhere / user_has_seen_anywhere. Используются в тестах производительности.
 debug_counter_spammer_queries = 0
 debug_counter_seen_queries = 0
-
-def _fetch_user_ids(cursor) -> set[int]:
-    """Helper function to convert cursor results to a set of user IDs."""
-    return {int(uid) for (uid,) in cursor.fetchall() if uid is not None}
 
 def get_db_connection():
     """Return a new DB connection."""
@@ -88,7 +83,8 @@ def is_group_configured(group_id: int) -> bool:
     """Проверка наличия группы в кэше настроенных групп."""
     return any(group["group_id"] == group_id for group in configured_groups_cache)
 
-async def add_configured_group(chat: Chat, update: Update):
+async def add_configured_group(update):
+    chat = update.effective_chat
     user = update.effective_user
     conn = None
     cursor = None
@@ -185,14 +181,14 @@ def load_user_caches():
         cur = conn.cursor()
         # Спамеры
         cur.execute("SELECT DISTINCT user_id FROM user_entries WHERE spammer = TRUE")  # type: ignore[arg-type]
-        spammers_cache = _fetch_user_ids(cur)
+        spammers_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
         # Seen пользователи
         cur.execute("SELECT DISTINCT user_id FROM user_entries WHERE seen_message = TRUE")  # type: ignore[arg-type]
-        seen_users_cache = _fetch_user_ids(cur)
+        seen_users_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
         # Подозрительные: хотя бы одна запись без seen и без spammer
         cur.execute("""SELECT DISTINCT user_id FROM user_entries 
             WHERE seen_message = FALSE AND spammer = FALSE""")  # type: ignore[arg-type]
-        suspicious_users_cache = _fetch_user_ids(cur)
+        suspicious_users_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
     except mysql.connector.Error as err:
         logger.critical(f"Database error while loading user caches: {err}.")
         raise SystemExit("Database error.")
@@ -341,7 +337,14 @@ def mark_seen_in_group(user_id: int, group_id: int):
     seen_users_cache.add(user_id)
     not_seen_cache.discard(user_id)
     suspicious_users_cache.discard(user_id)
-
+    # Дополнительное гарантированное обновление ссылки (на случай если где-то удерживается старая ссылка)
+    if user_id not in seen_users_cache:
+        # rebind (хотя теоретически не нужно, но оставляем как страховку)
+        tmp = set(seen_users_cache)
+        tmp.add(user_id)
+        seen_users_cache = tmp  # type: ignore
+    if user_id in not_seen_cache:
+        not_seen_cache = {x for x in not_seen_cache if x != user_id}  # type: ignore
     conn = None
     cur = None
     success = False
@@ -438,7 +441,7 @@ def groups_where_spammer(user_id: int) -> List[int]:
             (user_id,),
         )
         rows = cur.fetchall()
-        return [int(row[0]) for row in rows if row[0] is not None]  # type: ignore[misc]
+        return [int(row[0]) for row in rows if row and row[0] is not None]  # type: ignore[misc]
     except mysql.connector.Error as err:
         logger.exception(f"DB error groups_where_spammer({user_id}): {err}")
         return []
