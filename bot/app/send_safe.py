@@ -5,7 +5,7 @@ from .database import configured_groups_cache
 import mysql.connector
 from .config import DB_CONFIG
 
-async def _persist_migrated_group(old_id: int, new_id: int):
+async def _persist_migrated_group(old_id: int, new_id: int) -> None:
     """Update DB and in-memory caches when a group migrates to supergroup (new chat id).
     Telegram migrates normal groups to supergroups and changes chat_id (adds -100 prefix).
     We need to keep data continuity by updating the stored group_id.
