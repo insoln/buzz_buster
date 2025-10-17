@@ -30,7 +30,7 @@ async def _persist_migrated_group(old_id: int, new_id: int) -> None:
         cur.execute("UPDATE user_entries SET group_id=%s WHERE group_id=%s", (new_id, old_id))
         conn.commit()
         logger.info(f"Persisted migration old_group_id={old_id} -> new_group_id={new_id} in database.")
-    except mysql.connector.Error as e:  # type: ignore[name-defined]
+    except mysql.connector.Error as e:
         logger.exception(f"Failed to persist migrated group id {old_id}->{new_id}: {e}")
     finally:
         if cur:
