@@ -2,6 +2,7 @@
 
 import logging
 import logging.handlers
+import logging.config
 from .config import *
 import asyncio
 from telegram import Bot
@@ -32,45 +33,99 @@ class TelegramLogHandler(logging.Handler):
         except Exception as e:
             print(f"Failed to send log via Telegram: {e}")
 
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "console": {
+            "format": "%(update_id)s %(asctime)s - %(levelname)s (%(filename)s:%(lineno)d): %(message)s"
+        },
+        "file": {
+            "format": "%(asctime)s - %(levelname)s - %(message)s"
+        },
+        "telegram": {
+            "format": "%(message)s"
+        },
+    },
+    "filters": {
+        "update_id_filter": {
+            "()": "app.logging_filters.UpdateIDFilter"
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": CONSOLE_LOG_LEVEL,
+            "formatter": "console",
+            "filters": ["update_id_filter"]
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": FILE_LOG_LEVEL,
+            "formatter": "file",
+            "filename": "/workspace/app/buzzbuster.log",
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 2,
+            "filters": ["update_id_filter"]
+        },
+        # Логирование в Telegram можно оставить как есть
+    },
+    "loggers": {
+        "telegram_bot": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False
+        }
+    }
+}
 
-# Настройка логирования
+logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger("telegram_bot")
-logger.setLevel(logging.DEBUG)
 
-# Форматтеры для логирования
-console_formatter = logging.Formatter('%(update_id)s %(asctime)s - %(levelname)s (%(filename)s:%(lineno)d): %(message)s')
-file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-telegram_formatter = logging.Formatter("%(message)s")
-
-# Логирование в файл
-file_handler = logging.handlers.RotatingFileHandler(
-    "/workspace/app/buzzbuster.log", maxBytes=5 * 1024 * 1024, backupCount=2
-)
-file_handler.setLevel(getattr(logging, FILE_LOG_LEVEL, logging.INFO))
-file_handler.setFormatter(file_formatter)
-logger.addHandler(file_handler)
-logger.addFilter(UpdateIDFilter())
-
-
-# Логирование в консоль
-console_handler = logging.StreamHandler()
-console_handler.setLevel(
-    getattr(logging, CONSOLE_LOG_LEVEL, logging.INFO))
-console_handler.setFormatter(console_formatter)
-logger.addHandler(console_handler)
-
+def log_event(action: str, **fields):
+    """Структурированное логирование одного события в JSON.
+    action: строковый тип события (ban, mark_spammer, first_message_seen, join, unban, cas_ban,...)
+    Остальные именованные параметры сериализуются. Ошибки сериализации не роняют выполнение.
+    """
+    import json
+    import time
+    payload = {
+        "ts": time.time(),
+        "action": action,
+    }
+    # update_id из контекстной переменной если есть
+    try:
+        upd_id = current_update_id.get()
+        if upd_id is not None:
+            payload["update_id"] = upd_id
+    except Exception:
+        pass
+    # Добавляем пользовательские поля
+    for k, v in fields.items():
+        # Пробуем привести к простому виду
+        try:
+            if hasattr(v, 'id') and not isinstance(v, (int, str)):
+                # Telegram objects -> id
+                payload[k] = getattr(v, 'id', str(v))
+            else:
+                payload[k] = v
+        except Exception:
+            payload[k] = str(v)
+    try:
+        logger.info(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    except Exception:
+        logger.info(f"STRUCT_LOG_FALLBACK action={action} fields={fields}")
 
 def getLoggingLevelByName(level: str) -> int:
     """Получение уровня логирования по имени."""
     return getattr(logging, level.upper(), logging.WARNING)
 
-
-# Создаем экземпляр бота для отправки уведомлений
-bot = Bot(token=TELEGRAM_API_KEY)
+# Создаем экземпляр бота для отправки уведомлений (если токен задан)
+bot = Bot(token=TELEGRAM_API_KEY) if TELEGRAM_API_KEY and TELEGRAM_API_KEY.strip() else None
 
 # Логирование в Telegram
-if STATUSCHAT_TELEGRAM_ID:
+if STATUSCHAT_TELEGRAM_ID and bot is not None:
     telegram_handler = TelegramLogHandler(bot, STATUSCHAT_TELEGRAM_ID)
     telegram_handler.setLevel(getLoggingLevelByName(TELEGRAM_LOG_LEVEL))
-    telegram_handler.setFormatter(telegram_formatter)
+    telegram_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(telegram_handler)
