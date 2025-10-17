@@ -1,4 +1,4 @@
-from .logging_setup import logger,current_update_id
+from .logging_setup import logger, current_update_id, log_event
 from .antispam import check_openai_spam
 
 from telegram import (
@@ -12,126 +12,149 @@ from .formatting import display_chat, display_user
 from .database import (
     is_group_configured,
     configured_groups_cache,
-    spammers_cache,
-    suspicious_users_cache
+    get_user_entry,
+    get_user_state_repo,
 )
 import mysql.connector
 from .config import *
 
+# Вспомогательная функция для проверки спама
+async def process_spam(update: Update, context: CallbackContext, user, chat) -> bool:
+    is_spam = False
+    # Проверка пересланного сообщения
+    msg = update.message
+    if msg and msg.forward_origin:
+        is_spam = True
+    # Проверка через OpenAI
+    if not is_spam:
+        try:
+            group_settings = next(
+                (group["settings"] for group in configured_groups_cache if group["group_id"] == chat.id),
+                {})
+            instructions = group_settings.get("instructions", INSTRUCTIONS_DEFAULT_TEXT)
+            logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
+            if msg:
+                is_spam = await check_openai_spam(msg.text or msg.caption, instructions)
+        except Exception as e:
+            logger.exception(f"Error querying OpenAI: {e}")
+    return is_spam
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Обработка входящих сообщений в настроенных группах."""
-    current_update_id.set(update.update_id)
+    current_update_id.set(update.update_id)  # type: ignore[arg-type]
 
-    if not update.message:
-        logger.debug("Received update without message.")
-        return
-
+    message = update.message
     chat = update.effective_chat
     user = update.effective_user
 
-    logger.debug(
-        f"Handling message from user {display_user(user)} in chat {
-            display_chat(chat)} with text: {update.message.text or update.message.caption}."
-    )
+    if not message or chat is None or user is None:
+        logger.debug("Update missing message/chat/user; skipping.")
+        return
+
+    log_event("message_receive", user_id=user.id, chat_id=chat.id, text=message.text or message.caption)
 
     if chat.type == "private":
-        await update.message.reply_text("Этот бот предназначен только для групп.")
+        await update.message.reply_text("Этот бот предназначен только для групп.")  # type: ignore[attr-defined]
         logger.debug("Received message in private chat.")
         return
 
     if not is_group_configured(chat.id):
-        logger.debug(f"Group {chat.id} is not configured.")
+        log_event("skip_not_configured", chat_id=chat.id)
         return
 
-    if user.id in spammers_cache:
-        await context.bot.ban_chat_member(chat.id, user.id)
-        await update.message.delete()
-        logger.info(
-            f"Banned known spammer {display_user(user)} from group {
-                display_chat(chat)}."
-        )
-        return
+    repo = get_user_state_repo()
 
-    if user.id in suspicious_users_cache:
-        is_spam=False
-        
-        # forward
-        if not is_spam:
-            if update.message.forward_origin:
-                is_spam = True     
-        
-        # OpenAI
-        if not is_spam:
-            try:
-                group_settings = next(
-                    (group["settings"]
-                    for group in configured_groups_cache if group["group_id"] == chat.id),
-                    {},
-                )        
-                instructions = group_settings.get("instructions", INSTRUCTIONS_DEFAULT_TEXT)
-                logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
-                is_spam = await check_openai_spam(update.message.text or update.message.caption, instructions)
-            except Exception as e:
-                logger.exception(
-                    f"Error querying OpenAI for message processing: {e}")                
-    
+    # 1. Сообщение от спамера глобально / локально
+    if repo.is_spammer(user.id):
         try:
-            if is_spam:
-                logger.info(
-                    f"Message from {display_user(user)} is identified as spam, user will be banned in all groups."
-                )
+            await context.bot.ban_chat_member(chat.id, user.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        log_event("ban_global_spammer", user_id=user.id, chat_id=chat.id)
+        return
+
+    # 2. Состояние в текущей группе
+    entry = get_user_entry(user.id, chat.id)  # (seen, spammer) or None
+    current_seen = entry[0] if entry else None
+    current_spammer = entry[1] if entry else None
+
+    # 3. Если пользователь в общем suspicious списке -> проверить
+    if repo.is_suspicious(user.id):
+        is_spam = await process_spam(update, context, user, chat)
+        if is_spam:
+            repo.mark_spammer(user.id, chat.id)
+            try:
                 await context.bot.ban_chat_member(chat.id, user.id)
-                await update.message.delete()
-                spammers_cache.add(user.id)
-                suspicious_users_cache.discard(user.id)
-
-                # Обновление базы данных
                 try:
-                    conn = mysql.connector.connect(**DB_CONFIG)
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        """
-                        UPDATE `user_entries` set spammer = TRUE where user_id=%s and group_id = %s
-                        """,
-                        (user.id, chat.id),
-                    )
-                    conn.commit()
-                except mysql.connector.Error as err:
-                    logger.exception(
-                        f"Database error when updating spammer status: {err}")
-                finally:
-                    cursor.close()
-                    conn.close()
+                    await message.delete()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            log_event("first_message_spam", user_id=user.id, chat_id=chat.id)
+        else:
+            repo.mark_seen(user.id, chat.id)
+            log_event("first_message_ham", user_id=user.id, chat_id=chat.id)
+        return
 
-                logger.info(
-                    f"Banned spammer {display_user(user)} from group {
-                        display_chat(chat)}."
-                )
-            else:
-                suspicious_users_cache.discard(user.id)
+    # 4. Если уже виделся в этой группе -> не проверяем
+    if current_seen:
+        log_event("skip_seen", user_id=user.id, chat_id=chat.id)
+        return
+
+    # 5. Нет записи по группе
+    if entry is None:
+        # 5a. Есть опыт (seen) где-либо -> переносим доверие
+        if repo.is_seen(user.id):
+            repo.mark_seen(user.id, chat.id)
+            log_event("inherit_trust", user_id=user.id, chat_id=chat.id)
+            return
+        # 5b. Совершенно новый -> создаём unseen (в репозитории он добавит в suspicious)
+        repo.mark_unseen(user.id, chat.id)
+        is_spam = await process_spam(update, context, user, chat)
+        if is_spam:
+            repo.mark_spammer(user.id, chat.id)
+            try:
+                await context.bot.ban_chat_member(chat.id, user.id)
                 try:
-                    conn = mysql.connector.connect(**DB_CONFIG)
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        """
-                        UPDATE user_entries SET seen_message = TRUE, spammer = FALSE WHERE user_id = %s
-                        """,
-                        (user.id,),
-                    )
-                    conn.commit()
-                except mysql.connector.Error as err:
-                    logger.exception(
-                        f"Database error when updating user entry: {err}")
-                finally:
-                    cursor.close()
-                    conn.close()
+                    await message.delete()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            log_event("new_user_spam", user_id=user.id, chat_id=chat.id)
+        else:
+            repo.mark_seen(user.id, chat.id)
+            log_event("new_user_ham", user_id=user.id, chat_id=chat.id)
+        return
 
-                logger.info(
-                    f"Message from user {display_user(user)} is not spam. User is no longer suspicious."
-                )
-        except Exception as e:
-            logger.exception(
-                f"Error processing message from user {display_user(user)}: {e}")
-    else:
-        logger.debug(f"User {display_user(user)} is not in suspicious users cache. Message will be processed normally.")
+    # 6. Есть запись, но seen_message=False (редкий случай если потеря кэша)
+    if entry and current_seen is False:
+        if repo.is_seen(user.id):
+            repo.mark_seen(user.id, chat.id)
+            log_event("late_seen_upgrade", user_id=user.id, chat_id=chat.id)
+            return
+        # fallback: считаем подозрительным повторно (обновляем unseen метку для консистентности)
+        repo.mark_unseen(user.id, chat.id)
+        is_spam = await process_spam(update, context, user, chat)
+        if is_spam:
+            repo.mark_spammer(user.id, chat.id)
+            try:
+                await context.bot.ban_chat_member(chat.id, user.id)
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            log_event("late_suspicious_spam", user_id=user.id, chat_id=chat.id)
+        else:
+            repo.mark_seen(user.id, chat.id)
+            log_event("late_suspicious_ham", user_id=user.id, chat_id=chat.id)
+        return
+
+    log_event("unhandled_path", user_id=user.id, chat_id=chat.id)

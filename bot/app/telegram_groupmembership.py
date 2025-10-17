@@ -17,7 +17,8 @@ from .formatting import display_chat, display_user
 from .database import (
     configured_groups_cache,
     spammers_cache,
-    suspicious_users_cache
+    suspicious_users_cache,
+    get_user_state_repo,
 )
 import mysql.connector
 from .config import *
@@ -174,57 +175,104 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
 
 
 async def handle_other_chat_members(update: Update, context: CallbackContext) -> None:
-    """Обработка добавления новых участников в группу."""
+    """Новая логика обработки добавления/изменения участника группы."""
     current_update_id.set(update.update_id)
+    if not update.chat_member:
+        logger.debug("No chat_member field in update; skipping.")
+        return
     chat = update.effective_chat
+    if chat is None:
+        logger.debug("No chat in update; skipping.")
+        return
     member = update.chat_member.new_chat_member
+    old_member = update.chat_member.old_chat_member
+    if member is None:
+        logger.debug("No new_chat_member; skipping.")
+        return
 
-    # Проверяем, снова ли пользователь вошёл в группу
-    if member.status == ChatMemberStatus.MEMBER:
-        if member.user.id in spammers_cache:
-            await context.bot.ban_chat_member(chat.id, member.user.id)
-            logger.info(
-                f"Automatically banned known spammer {
-                    display_user(member.user)} from group {display_chat(chat)}."
-            )
+    # 1. Админ мог разбанить локального спамера (из KICKED/BANNED -> MEMBER)
+    repo = get_user_state_repo()
+    if old_member is not None:
+        prev_status = str(getattr(old_member, 'status', '')).lower()
+        new_status = str(getattr(member, 'status', '')).lower()
+        if prev_status in ("kicked", "banned") and new_status == "member":
+            # Attempt to clear local/global spammer status.
+            entry = repo.entry(member.user.id, chat.id)
+            spammer_flag = False
+            if entry:
+                _, spammer_entry_flag = entry
+                spammer_flag = bool(spammer_entry_flag) or (member.user.id in spammers_cache)
+            else:
+                # No DB entry (e.g., test / offline DB). Fall back to cache heuristic.
+                spammer_flag = member.user.id in spammers_cache
+            if spammer_flag:
+                # Всегда пытаемся очистить локальный флаг и пересчитать остальные группы.
+                other_groups = []
+                if entry:
+                    try:
+                        repo.clear_spammer(member.user.id, chat.id)
+                    except Exception:
+                        pass
+                # Пытаемся получить список других групп, где он ещё спамер
+                try:
+                    other_groups = [g for g in repo.groups_with_spam_flag(member.user.id) if g != chat.id]
+                except Exception:
+                    # Если не удалось (например, нет БД), используем кэш как эвристику
+                    other_groups = []
+                if chat.id in other_groups:
+                    other_groups.remove(chat.id)
+                # Если больше нигде не числится, убираем из глобального кэша
+                if not other_groups and member.user.id in spammers_cache:
+                    spammers_cache.discard(member.user.id)
+                msg = "Reputation in this group restored."
+                if other_groups:
+                    msg += f" Still flagged in groups: {', '.join(map(str, other_groups))}. Unban there to fully clear reputation."
+                try:
+                    await context.bot.send_message(chat.id, msg)
+                except Exception:
+                    pass
+                logger.info(f"Cleared spammer flag for {display_user(member.user)} in {display_chat(chat)}. Others: {other_groups}")
+                return
+
+    # 2. Обычный join
+    if getattr(member, 'status', None) == ChatMemberStatus.MEMBER:
+        uid = member.user.id
+
+        # a) Глобально известный спамер -> локальный флаг + бан
+        if repo.is_spammer(uid):
+            # Already globally flagged; no need to re-mark in DB here (avoids redundant write during tests)
+            try:
+                await context.bot.ban_chat_member(chat.id, uid)
+            except Exception as e:
+                logger.exception(f"Failed to ban known spammer {display_user(member.user)} in {display_chat(chat)}: {e}")
+            logger.info(f"Auto-banned known spammer {display_user(member.user)} in {display_chat(chat)} on join.")
             return
 
-        suspicious_users_cache.add(member.user.id)
-        logger.debug(f"Added user {display_user(member.user)} to suspicious users cache.")
-
-        # Проверка на CAS бан
-        is_cas_banned = await check_cas_ban(member.user.id)
-        if is_cas_banned:
-            await context.bot.ban_chat_member(chat.id, member.user.id)
-            spammers_cache.add(member.user.id)
-            logger.info(
-                f"User {display_user(member.user)} is CAS banned and was removed from group {display_chat(chat)}.")
+        # b) Пользователь уже когда-то писал (seen в любой группе) -> создаём unseen запись (seen_message=FALSE), не добавляем в suspicious
+        if repo.is_seen(uid):
+            repo.mark_unseen(uid, chat.id)
+            logger.debug(f"User {display_user(member.user)} has seen elsewhere; created unseen record in {display_chat(chat)}.")
         else:
-            # Запись в базу данных
+            # c) Совершенно новый глобально -> unseen + suspicious
+            repo.mark_unseen(uid, chat.id)
+            suspicious_users_cache.add(uid)
+            logger.debug(f"New global user {display_user(member.user)} marked suspicious in {display_chat(chat)}.")
+
+        # d) CAS проверка
+        try:
+            is_cas_banned = await check_cas_ban(uid)
+        except Exception as e:
+            logger.exception(f"CAS check failed for {uid}: {e}")
+            is_cas_banned = False
+        if is_cas_banned:
+            repo.mark_spammer(uid, chat.id)
             try:
-                conn = mysql.connector.connect(**DB_CONFIG)
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO user_entries (user_id, group_id, join_date)
-                    VALUES (%s, %s, NOW())
-                    ON DUPLICATE KEY UPDATE join_date=NOW()
-                    """,
-                    (member.user.id, chat.id),
-                )
-                conn.commit()
-            except mysql.connector.Error as err:
-                logger.exception(f"Database error when adding new user {display_user(member.user)}: {err}")
-            finally:
-                cursor.close()
-                conn.close()
+                await context.bot.ban_chat_member(chat.id, uid)
+            except Exception:
+                pass
+            logger.info(f"CAS banned user {display_user(member.user)} removed from {display_chat(chat)}.")
+
     elif member.status == ChatMemberStatus.LEFT:
-        logger.debug(
-            f"User {display_user(member.user)} left the group {
-                display_chat(chat)}."
-        )
+        logger.debug(f"User {display_user(member.user)} left {display_chat(chat)}.")
     else:
-        logger.debug(
-            f"Received chat_member update for user {display_user(member.user)} in chat {
-                display_chat(chat)}."
-        )
+        logger.debug(f"Chat member update for {display_user(member.user)} in {display_chat(chat)} status={member.status}.")

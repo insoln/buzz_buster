@@ -9,7 +9,7 @@ from telegram.ext import (
 from .formatting import display_chat, display_user
 from .database import (
     is_group_configured,
-    configured_groups_cache,
+    add_configured_group,
 )
 import mysql.connector
 from .config import *
@@ -61,37 +61,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
         return
 
     # Настройка группы
-    try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO `groups` (group_id) VALUES (%s) ON DUPLICATE KEY UPDATE group_id=group_id",
-            (chat.id,)
-        )
-        cursor.execute(
-            "INSERT INTO `group_settings` (group_id, parameter, value) VALUES (%s, %s, %s) "
-            "ON DUPLICATE KEY UPDATE value=%s",
-            (chat.id, "instructions", INSTRUCTIONS_DEFAULT_TEXT, INSTRUCTIONS_DEFAULT_TEXT)
-        )
-        conn.commit()
-    except mysql.connector.Error as err:
-        logger.exception(f"Database error when configuring group {display_chat(chat)}: {err}")
-        await update.message.reply_text("Ошибка настройки бота для этой группы.")
-        return
-    finally:
-        cursor.close()
-        conn.close()
-
-    # Обновление кэша настроенных групп
-    configured_groups_cache.append(
-        {"group_id": chat.id, "settings": {
-            "instructions": INSTRUCTIONS_DEFAULT_TEXT}}
-    )
-
-    await update.message.reply_text(
-        "Бот настроен для этой группы. Используйте /help, чтобы увидеть доступные команды."
-    )
-    logger.info(f"User {display_user(user)} configured group {display_chat(chat)}.")
+    await add_configured_group(chat, update)
 
 
 async def help_command(update: Update, context: CallbackContext) -> None:
