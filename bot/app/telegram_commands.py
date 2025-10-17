@@ -100,7 +100,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
     if getattr(chat, 'type', None) == "private":
         # Если пользователь глобально помечен спамером – показать персональный отчёт
-        from .database import groups_where_spammer, get_db_connection
+        from .database import groups_where_spammer
         from .logging_setup import log_event
         repo = get_user_state_repo()
         spam_groups = groups_where_spammer(user.id)
@@ -407,34 +407,52 @@ async def ban_command(update: Update, context: CallbackContext) -> None:
         return
     # Only in private chat
     if getattr(chat, 'type', None) != 'private':
-        await message.reply_text("Эта команда доступна только в личке.")
+        try:
+            await message.reply_text("Эта команда доступна только в личке.")
+        except Exception as e:
+            logger.error(f"Failed to send reply in /ban (outside private chat): {e}", exc_info=True)
         logger.debug("/ban invoked outside private chat")
         return
     # Admin check
     if not ADMIN_TELEGRAM_ID or str(getattr(admin, 'id', '')) != str(ADMIN_TELEGRAM_ID):
-        await message.reply_text("Только администратор может использовать эту команду.")
+        try:
+            await message.reply_text("Только администратор может использовать эту команду.")
+        except Exception:
+            pass
         logger.debug("/ban invoked by non-admin")
         return
     parts = (getattr(message, 'text', '') or '').strip().split()
     if len(parts) < 2:
-        await message.reply_text("Использование: /ban <user_id>@<group_id>")
+        try:
+            await message.reply_text("Использование: /ban <user_id>@<group_id>")
+        except Exception:
+            pass
         return
     token = parts[1]
     if '@' not in token:
-        await message.reply_text("Формат: /ban <user_id>@<group_id>")
+        try:
+            await message.reply_text("Формат: /ban <user_id>@<group_id>")
+        except Exception:
+            pass
         return
     user_part, group_part = token.split('@', 1)
     try:
         target_user_id = int(user_part)
         target_group_id = int(group_part)
     except ValueError:
-        await message.reply_text("user_id и group_id должны быть числами.")
+        try:
+            await message.reply_text("user_id и group_id должны быть числами.")
+        except Exception:
+            pass
         return
     # Validate group is configured
     if not is_group_configured(target_group_id):
-        await message.reply_text(
-            "Эта группа не настроена или неизвестна. Сначала выполните /start в нужной группе."
-        )
+        try:
+            await message.reply_text(
+                "Эта группа не настроена или неизвестна. Сначала выполните /start в нужной группе."
+            )
+        except Exception as e:
+            logger.exception(f"Failed to send group not configured message in /ban: {e}")
         logger.debug(f"/ban refused for group {target_group_id}: group not configured")
         return
     from .database import get_user_state_repo
@@ -460,11 +478,14 @@ async def ban_command(update: Update, context: CallbackContext) -> None:
             status_bits.append("TG_BAN=OK")
         else:
             status_bits.append("TG_BAN=FAIL")
-        await message.reply_text(
-            f"Пользователь {target_user_id} помечен как спамер в группе {target_group_id}. "
-            + ("Забанен." if ban_success else "(не удалось забанить)")
-            + " [" + ", ".join(status_bits) + "]"
-        )
+        try:
+            await message.reply_text(
+                f"Пользователь {target_user_id} помечен как спамер в группе {target_group_id}. "
+                + ("Забанен." if ban_success else "(не удалось забанить)")
+                + " [" + ", ".join(status_bits) + "]"
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to send reply in /ban command: {exc}", exc_info=True)
         from .logging_setup import log_event
         log_event(
             'admin_force_ban',
@@ -555,7 +576,10 @@ async def diag_command(update: Update, context: CallbackContext) -> None:
         f"SUSPICIOUS: {'YES' if target_user_id in suspicious_users_cache else 'NO'}",
         f"DRY_SELECT: {dry}",
     ]
-    await message.reply_text("\n".join(lines))
+    try:
+        await message.reply_text("\n".join(lines))
+    except Exception as e:
+        logger.exception(f"Failed to send diag message: {e}")
     from .logging_setup import log_event
     log_event('admin_diag', target_user_id=target_user_id, target_group_id=target_group_id,
               db_connect=db_ok, entry=entry, spam_groups=spam_groups,

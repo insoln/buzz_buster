@@ -39,6 +39,7 @@ from telegram.ext import (
     filters,
 )
 from .config import *
+from .send_safe import send_message_with_migration
 
 
 def _debug_mode() -> bool:
@@ -199,11 +200,9 @@ async def main():
             except Exception:
                 logger.warning(f"Invalid STATUSCHAT_TELEGRAM_ID value: {STATUSCHAT_TELEGRAM_ID}")
         for chat_id in target_chats:
-            try:
-                await application.bot.send_message(chat_id=chat_id, text="Bot startup OK")
-            except Exception as e:
-                # Avoid noisy stack traces for typical missing chat errors
-                logger.info(f"Startup notification skipped for chat {chat_id}: {e}")
+            msg_result = await send_message_with_migration(application.bot, chat_id, text="Bot startup OK")
+            if msg_result is None:
+                logger.info(f"Startup notification skipped or failed for chat {chat_id}")
 
         try:
             # Run the bot until a termination signal is received

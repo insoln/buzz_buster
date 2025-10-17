@@ -20,6 +20,7 @@ from .database import (
     suspicious_users_cache,
     get_user_state_repo,
 )
+from .send_safe import send_message_with_migration
 import mysql.connector
 from .config import *
 
@@ -65,7 +66,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
             else:
                 log_event("bot_promoted_admin", chat=chat_obj, user=from_user)
                 try:
-                    await context.bot.send_message(chat_id=chat_id, text="I have been promoted to an administrator. I am ready to protect your group from spam!")
+                    await send_message_with_migration(context.bot, chat_id, text="I have been promoted to an administrator. I am ready to protect your group from spam!")
                 except BadRequest as e:
                     if "not enough rights to send text messages" in str(e):
                         log_event("bot_promoted_no_send_rights", chat=chat_obj, user=from_user)
@@ -73,7 +74,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                             raise
         elif isinstance(member, ChatMemberMember):
             log_event("bot_no_admin_rights", chat=chat_obj, user=from_user)
-            await context.bot.send_message(chat_id=chat_id, text="I need administrator rights, I cannot protect your group from spam without them. Please promote me to an administrator.")
+            await send_message_with_migration(context.bot, chat_id, text="I need administrator rights, I cannot protect your group from spam without them. Please promote me to an administrator.")
         elif isinstance(member, (ChatMemberLeft, ChatMemberBanned)):
             log_event("bot_removed", chat=chat_obj, user=from_user)
             group = next((g for g in configured_groups_cache if g["group_id"] == chat_id), None)
@@ -100,12 +101,12 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                 chat_member = await context.bot.get_chat_member(chat_id, from_user.id if from_user else context.bot.id)
                 if chat_member.status not in ["administrator", "creator"]:
                     log_event("bot_added_by_non_admin", chat=chat_obj, user=from_user)
-                    await context.bot.send_message(chat_id=chat_id, text="Only administrators can add the bot to the group. I will leave now.")
+                    await send_message_with_migration(context.bot, chat_id, text="Only administrators can add the bot to the group. I will leave now.")
                     await context.bot.leave_chat(chat_id)
                     return
             except BadRequest as e:
                 log_event("check_member_status_error", chat=chat_obj, user=from_user, error=str(e))
-            await context.bot.send_message(chat_id=chat_id, text="Hello! I am your antispam guard bot. Thank you for adding me to the group. Make me an administrator to enable my features.")
+            await send_message_with_migration(context.bot, chat_id, text="Hello! I am your antispam guard bot. Thank you for adding me to the group. Make me an administrator to enable my features.")
 
 
 @with_update_id
@@ -189,7 +190,7 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                         "Ты больше нигде не числишься спамером. Приятного общения!"
                     )
                 try:
-                    await context.bot.send_message(chat.id, msg, parse_mode="HTML")
+                    await send_message_with_migration(context.bot, chat.id, msg, parse_mode="HTML")
                 except Exception:
                     pass
                 # Mark user as seen after unban (восстановлен репутационный доверенный статус)

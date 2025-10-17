@@ -103,7 +103,11 @@ ESSENTIAL_ACTIONS = {
     'ban_global_spammer', 'first_message_spam', 'first_message_ham',
     'new_user_spam', 'new_user_ham', 'late_suspicious_spam', 'late_suspicious_ham',
     'unban_clear_spammer', 'join_ban_known_spammer', 'cas_ban',
-    'inherit_trust', 'late_seen_upgrade', 'admin_global_unban', 'admin_force_ban'
+    'inherit_trust', 'late_seen_upgrade', 'admin_global_unban', 'admin_force_ban',
+    # Added after PR review to elevate diagnostic & schema harden summary events
+    'admin_diag', 'schema_harden_summary',
+    # DB write lifecycle for marking spammer (attempts and outcomes)
+    'db_mark_spammer_success', 'db_mark_spammer_failed'
 }
 
 # Actions considered low-value (noise) will always be DEBUG (explicit list optional; fallback is debug anyway)
