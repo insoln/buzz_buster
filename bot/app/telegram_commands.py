@@ -409,8 +409,8 @@ async def ban_command(update: Update, context: CallbackContext) -> None:
     if getattr(chat, 'type', None) != 'private':
         try:
             await message.reply_text("Эта команда доступна только в личке.")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to send reply in /ban (outside private chat): {e}", exc_info=True)
         logger.debug("/ban invoked outside private chat")
         return
     # Admin check
