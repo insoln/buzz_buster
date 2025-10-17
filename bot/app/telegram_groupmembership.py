@@ -49,7 +49,8 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                     cursor.close()
                     conn.close()
                     configured_groups_cache.append(
-                        {"group_id": chat_id, "settings": {}})
+                        {"group_id": chat_id, "settings": {}}
+                    )
                     logger.info(
                         f"Channel {display_chat(update.my_chat_member.chat)} added to configured groups cache and database by user {
                             display_user(update.my_chat_member.from_user)}."
@@ -59,8 +60,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                         f"Database error while adding channel {display_chat(update.my_chat_member.chat)} by user {
                             display_user(update.my_chat_member.from_user)}: {err}"
                     )
-                    raise SystemExit(
-                        "Bot added to channel and database update failed.")
+                    raise SystemExit("Bot added to channel and database update failed.")
             else:
                 # Бот добавлен в группу
                 logger.debug(
@@ -112,16 +112,14 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                         "DELETE FROM `groups` WHERE group_id = %s", (chat_id,)
                     )
                     cursor.execute(
-                        "DELETE FROM `group_settings` WHERE group_id = %s", (
-                            chat_id,)
+                        "DELETE FROM `group_settings` WHERE group_id = %s", (chat_id,)
                     )
                     conn.commit()
                     cursor.close()
                     conn.close()
                     configured_groups_cache.remove(group)
                     logger.info(
-                        f"Group {chat_id} ({update.my_chat_member.chat.title}) removed from configured groups cache and database by user {
-                            update.my_chat_member.from_user.id} ({update.my_chat_member.from_user.username})."
+                        f"Group {display_chat(update.my_chat_member.chat)} removed from configured groups cache and database by user {display_user(update.my_chat_member.from_user)}"
                     )
                 except mysql.connector.Error as err:
                     logger.error(
@@ -132,8 +130,7 @@ async def handle_my_chat_members(update: Update, context: CallbackContext) -> No
                         "Bot removed from group and database update failed."
                     )
                 logger.info(
-                    f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {
-                        display_user(update.my_chat_member.from_user)}"
+                    f"Bot has been removed from group {display_chat(update.my_chat_member.chat)} by user {display_user(update.my_chat_member.from_user)}"
                 )
             else:
                 logger.debug(
@@ -193,15 +190,17 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
     # 1. Админ мог разбанить локального спамера (из BANNED -> MEMBER)
     repo = get_user_state_repo()
     if old_member is not None:
-        prev_status = str(getattr(old_member, 'status', '')).lower()
-        new_status = str(getattr(member, 'status', '')).lower()
+        prev_status = str(getattr(old_member, "status", "")).lower()
+        new_status = str(getattr(member, "status", "")).lower()
         if prev_status in ("banned", "restricted") and new_status == "member":
             # Attempt to clear local/global spammer status.
             entry = repo.entry(member.user.id, chat.id)
             spammer_flag = False
             if entry:
                 _, spammer_entry_flag = entry
-                spammer_flag = bool(spammer_entry_flag) or (member.user.id in spammers_cache)
+                spammer_flag = bool(spammer_entry_flag) or (
+                    member.user.id in spammers_cache
+                )
             else:
                 # No DB entry (e.g., test / offline DB). Fall back to cache heuristic.
                 spammer_flag = member.user.id in spammers_cache
@@ -215,7 +214,11 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                         pass
                 # Пытаемся получить список других групп, где он ещё спамер
                 try:
-                    other_groups = [g for g in repo.groups_with_spam_flag(member.user.id) if g != chat.id]
+                    other_groups = [
+                        g
+                        for g in repo.groups_with_spam_flag(member.user.id)
+                        if g != chat.id
+                    ]
                 except Exception:
                     # Если не удалось (например, нет БД), используем кэш как эвристику
                     other_groups = []
@@ -231,11 +234,16 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                     await context.bot.send_message(chat.id, msg)
                 except Exception:
                     pass
-                log_event("unban_clear_spammer", user_id=member.user.id, chat_id=chat.id, other_groups=other_groups)
+                log_event(
+                    "unban_clear_spammer",
+                    user_id=member.user.id,
+                    chat_id=chat.id,
+                    other_groups=other_groups,
+                )
                 return
 
     # 2. Обычный join
-    if getattr(member, 'status', None) == ChatMemberStatus.MEMBER:
+    if getattr(member, "status", None) == ChatMemberStatus.MEMBER:
         uid = member.user.id
 
         # a) Глобально известный спамер -> локальный флаг + бан
@@ -244,7 +252,9 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
             try:
                 await context.bot.ban_chat_member(chat.id, uid)
             except Exception as e:
-                logger.exception(f"Failed to ban known spammer {display_user(member.user)} in {display_chat(chat)}: {e}")
+                logger.exception(
+                    f"Failed to ban known spammer {display_user(member.user)} in {display_chat(chat)}: {e}"
+                )
             log_event("join_ban_known_spammer", user_id=member.user.id, chat_id=chat.id)
             return
 
@@ -275,4 +285,9 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
     elif member.status == ChatMemberStatus.LEFT:
         log_event("user_left", user_id=member.user.id, chat_id=chat.id)
     else:
-        log_event("chat_member_update", user_id=member.user.id, chat_id=chat.id, status=member.status)
+        log_event(
+            "chat_member_update",
+            user_id=member.user.id,
+            chat_id=chat.id,
+            status=member.status,
+        )

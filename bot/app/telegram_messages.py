@@ -18,6 +18,7 @@ from .database import (
 import mysql.connector
 from .config import *
 
+
 # Вспомогательная функция для проверки спама
 async def process_spam(update: Update, context: CallbackContext, user, chat) -> bool:
     is_spam = False
@@ -29,8 +30,13 @@ async def process_spam(update: Update, context: CallbackContext, user, chat) -> 
     if not is_spam:
         try:
             group_settings = next(
-                (group["settings"] for group in configured_groups_cache if group["group_id"] == chat.id),
-                {})
+                (
+                    group["settings"]
+                    for group in configured_groups_cache
+                    if group["group_id"] == chat.id
+                ),
+                {},
+            )
             instructions = group_settings.get("instructions", INSTRUCTIONS_DEFAULT_TEXT)
             logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
             if msg:
@@ -38,6 +44,7 @@ async def process_spam(update: Update, context: CallbackContext, user, chat) -> 
         except Exception as e:
             logger.exception(f"Error querying OpenAI: {e}")
     return is_spam
+
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Обработка входящих сообщений в настроенных группах."""
@@ -51,7 +58,12 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         logger.debug("Update missing message/chat/user; skipping.")
         return
 
-    log_event("message_receive", user_id=user.id, chat_id=chat.id, text=message.text or message.caption)
+    log_event(
+        "message_receive",
+        user_id=user.id,
+        chat_id=chat.id,
+        text=message.text or message.caption,
+    )
 
     if chat.type == "private":
         await update.message.reply_text("Этот бот предназначен только для групп.")  # type: ignore[attr-defined]

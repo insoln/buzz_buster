@@ -2,3 +2,4 @@ mysql-connector-python
 python-telegram-bot
 openai
 aiohttp
+sentry-sdk==1.45.0

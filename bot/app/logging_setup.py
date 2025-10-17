@@ -8,13 +8,19 @@ import asyncio
 from telegram import Bot
 from contextvars import ContextVar
 
-current_update_id = ContextVar('current_update_id', default=None)
+SENTRY_AVAILABLE = (
+    False  # Sentry integration handled in bot.py; keep flag for compatibility
+)
+
+current_update_id = ContextVar("current_update_id", default=None)
+
 
 class UpdateIDFilter(logging.Filter):
     def filter(self, record):
         update_id = current_update_id.get()
-        record.update_id = update_id if update_id is not None else '__main__'
+        record.update_id = update_id if update_id is not None else "__main__"
         return True
+
 
 class TelegramLogHandler(logging.Handler):
     """Класс для отправки логов в Telegram."""
@@ -33,6 +39,7 @@ class TelegramLogHandler(logging.Handler):
         except Exception as e:
             print(f"Failed to send log via Telegram: {e}")
 
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -40,24 +47,16 @@ LOGGING_CONFIG = {
         "console": {
             "format": "%(update_id)s %(asctime)s - %(levelname)s (%(filename)s:%(lineno)d): %(message)s"
         },
-        "file": {
-            "format": "%(asctime)s - %(levelname)s - %(message)s"
-        },
-        "telegram": {
-            "format": "%(message)s"
-        },
+        "file": {"format": "%(asctime)s - %(levelname)s - %(message)s"},
+        "telegram": {"format": "%(message)s"},
     },
-    "filters": {
-        "update_id_filter": {
-            "()": "app.logging_filters.UpdateIDFilter"
-        }
-    },
+    "filters": {"update_id_filter": {"()": "app.logging_filters.UpdateIDFilter"}},
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "level": CONSOLE_LOG_LEVEL,
             "formatter": "console",
-            "filters": ["update_id_filter"]
+            "filters": ["update_id_filter"],
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
@@ -66,7 +65,7 @@ LOGGING_CONFIG = {
             "filename": "/workspace/app/buzzbuster.log",
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 2,
-            "filters": ["update_id_filter"]
+            "filters": ["update_id_filter"],
         },
         # Логирование в Telegram можно оставить как есть
     },
@@ -74,13 +73,14 @@ LOGGING_CONFIG = {
         "telegram_bot": {
             "handlers": ["console", "file"],
             "level": "DEBUG",
-            "propagate": False
+            "propagate": False,
         }
-    }
+    },
 }
 
 logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger("telegram_bot")
+
 
 def log_event(action: str, **fields):
     """Структурированное логирование одного события в JSON.
@@ -88,6 +88,7 @@ def log_event(action: str, **fields):
     Остальные именованные параметры сериализуются. Ошибки сериализации не роняют выполнение.
     """
     import json, time
+
     payload = {
         "ts": time.time(),
         "action": action,
@@ -103,9 +104,9 @@ def log_event(action: str, **fields):
     for k, v in fields.items():
         # Пробуем привести к простому виду
         try:
-            if hasattr(v, 'id') and not isinstance(v, (int, str)):
+            if hasattr(v, "id") and not isinstance(v, (int, str)):
                 # Telegram objects -> id
-                payload[k] = getattr(v, 'id', str(v))
+                payload[k] = getattr(v, "id", str(v))
             else:
                 payload[k] = v
         except Exception:
@@ -115,9 +116,11 @@ def log_event(action: str, **fields):
     except Exception:
         logger.info(f"STRUCT_LOG_FALLBACK action={action} fields={fields}")
 
+
 def getLoggingLevelByName(level: str) -> int:
     """Получение уровня логирования по имени."""
     return getattr(logging, level.upper(), logging.WARNING)
+
 
 # Создаем экземпляр бота для отправки уведомлений (если токен задан)
 bot = Bot(token=TELEGRAM_API_KEY) if TELEGRAM_API_KEY else None
