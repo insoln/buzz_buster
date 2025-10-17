@@ -41,6 +41,10 @@ services:
       CONSOLE_LOG_LEVEL: ${CONSOLE_LOG_LEVEL:-INFO}
       TELEGRAM_LOG_LEVEL: ${TELEGRAM_LOG_LEVEL:-WARNING}
 
+      # Sentry DSN для мониторинга ошибок
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      APP_VERSION: ${APP_VERSION:-development}
+
       DB_HOST: db
       DB_NAME: ${DB_NAME:-buzz_buster}
       DB_USER: ${DB_USER:-default_db_user}

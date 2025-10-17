@@ -1,5 +1,8 @@
 import openai
-from openai.types.chat import ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam
+from openai.types.chat import (
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from .logging_setup import logger
 import aiohttp
 from .config import *
@@ -18,7 +21,8 @@ async def check_cas_ban(user_id: int) -> bool:
     except Exception as e:
         logger.exception(f"Error checking CAS for user_id {user_id}: {e}")
         return False
-    
+
+
 async def check_lols_ban(user_id: int) -> bool:
     """Проверка пользователя по базе lols.bot."""
     url = f"https://lols.bot/account?id={user_id}"
@@ -34,7 +38,9 @@ async def check_lols_ban(user_id: int) -> bool:
 
 async def check_openai_spam(message, instructions) -> bool:
     """Проверка текста на спам с помощью OpenAI."""
-    logger.debug(f"Checking message for spam:{instructions}\n{message}")
+    logger.debug(
+        f"Checking message for spam with instructions='{instructions[:80] + ('...' if len(instructions) > 80 else '')}' content_preview='{(message or '')[:120] + ('...' if message and len(message) > 120 else '')}'"
+    )
     prompt = [
         ChatCompletionSystemMessageParam(
             role="system",
@@ -62,7 +68,7 @@ async def check_openai_spam(message, instructions) -> bool:
                         "additionalProperties": False,
                     },
                 },
-            }
+            },
         )
         reply = response.choices[0].message.content
         logger.debug(f"OpenAI response: {reply}")
@@ -76,6 +82,7 @@ async def check_openai_spam(message, instructions) -> bool:
         logger.error(f"Failed to parse OpenAI response: {e}")
         is_spam = False
     return is_spam
+
 
 # Настройка OpenAI
 openai.api_key = OPENAI_API_KEY

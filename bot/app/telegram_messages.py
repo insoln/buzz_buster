@@ -3,8 +3,6 @@ from .antispam import check_openai_spam
 
 from telegram import (
     Update,
-    User,
-    Chat,
 )
 
 from telegram.ext import (
@@ -20,8 +18,9 @@ from .database import (
 import mysql.connector
 from .config import *
 
+
 # Вспомогательная функция для проверки спама
-async def process_spam(update: Update, context: CallbackContext, user: User, chat: Chat) -> bool:
+async def process_spam(update: Update, context: CallbackContext, user, chat) -> bool:
     is_spam = False
     # Проверка пересланного сообщения
     msg = update.message
@@ -31,8 +30,13 @@ async def process_spam(update: Update, context: CallbackContext, user: User, cha
     if not is_spam:
         try:
             group_settings = next(
-                (group["settings"] for group in configured_groups_cache if group["group_id"] == chat.id),
-                {})
+                (
+                    group["settings"]
+                    for group in configured_groups_cache
+                    if group["group_id"] == chat.id
+                ),
+                {},
+            )
             instructions = group_settings.get("instructions", INSTRUCTIONS_DEFAULT_TEXT)
             logger.debug(f"Sending prompt to OpenAI for user {display_user(user)}.")
             if msg:
@@ -40,6 +44,7 @@ async def process_spam(update: Update, context: CallbackContext, user: User, cha
         except Exception as e:
             logger.exception(f"Error querying OpenAI: {e}")
     return is_spam
+
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Обработка входящих сообщений в настроенных группах."""
@@ -53,7 +58,12 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         logger.debug("Update missing message/chat/user; skipping.")
         return
 
-    log_event("message_receive", user_id=user.id, chat_id=chat.id, text=message.text or message.caption)
+    log_event(
+        "message_receive",
+        user_id=user.id,
+        chat_id=chat.id,
+        text=message.text or message.caption,
+    )
 
     if chat.type == "private":
         await update.message.reply_text("Этот бот предназначен только для групп.")  # type: ignore[attr-defined]
@@ -81,7 +91,8 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     # 2. Состояние в текущей группе
     entry = get_user_entry(user.id, chat.id)  # (seen, spammer) or None
-    current_seen, current_spammer = entry if entry else (None, None)
+    current_seen = entry[0] if entry else None
+    current_spammer = entry[1] if entry else None
 
     # 3. Если пользователь в общем suspicious списке -> проверить
     if repo.is_suspicious(user.id):

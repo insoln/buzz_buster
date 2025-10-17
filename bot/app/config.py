@@ -13,6 +13,11 @@ INSTRUCTIONS_DEFAULT_TEXT = os.getenv(
 ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
 STATUSCHAT_TELEGRAM_ID = os.getenv("STATUSCHAT_TELEGRAM_ID")
 
+# Настройка Sentry для мониторинга ошибок
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+APP_VERSION = os.getenv("APP_VERSION", "unknown")
+DEBUG = os.getenv("DEBUG", "")
+
 # Настройка уровней логирования
 FILE_LOG_LEVEL = os.getenv("FILE_LOG_LEVEL", "INFO").upper()
 CONSOLE_LOG_LEVEL = os.getenv("CONSOLE_LOG_LEVEL", "INFO").upper()

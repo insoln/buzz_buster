@@ -3,28 +3,30 @@ from .logging_setup import logger
 import mysql.connector
 from .formatting import display_chat, display_user
 from typing import List, Optional, Tuple
-from telegram import Chat, Update
 
 
 # Глобальные переменные для кэширования данных
 configured_groups_cache = []  # [{group_id, settings}]
-suspicious_users_cache = set()  # user_ids currently having at least one unseen (seen_message=FALSE) non-spam entry
+suspicious_users_cache = (
+    set()
+)  # user_ids currently having at least one unseen (seen_message=FALSE) non-spam entry
 spammers_cache = set()  # user_ids having any spammer=TRUE entry
 seen_users_cache = set()  # user_ids having at least one seen_message=TRUE entry
 
-# Negative caches ("absence" memoization) to avoid repeated empty/unnecessary queries to the DB.
+# Negative caches ("absence" memoization) to avoid повторных холостых запросов в БД.
 # ВНИМАНИЕ: они инвалиируются при позитивных апдейтах (mark_spammer/mark_seen) и при очистке кэшей.
-not_spammers_cache = set()  # user_ids для которых подтверждено ОТСУТСТВИЕ spammer=TRUE записей
-not_seen_cache = set()      # user_ids для которых подтверждено отсутствие любых seen_message=TRUE записей
+not_spammers_cache = (
+    set()
+)  # user_ids для которых подтверждено ОТСУТСТВИЕ spammer=TRUE записей
+not_seen_cache = (
+    set()
+)  # user_ids для которых подтверждено отсутствие любых seen_message=TRUE записей
 
 # Отладочные счётчики количества реальных (лениво инициированных) запросов к БД
 # для функций user_has_spammer_anywhere / user_has_seen_anywhere. Используются в тестах производительности.
 debug_counter_spammer_queries = 0
 debug_counter_seen_queries = 0
 
-def _fetch_user_ids(cursor) -> set[int]:
-    """Helper function to convert cursor results to a set of user IDs."""
-    return {int(uid) for (uid,) in cursor.fetchall() if uid is not None}
 
 def get_db_connection():
     """Return a new DB connection."""
@@ -84,11 +86,14 @@ def check_and_create_tables():
             conn.close()
     logger.debug("Tables checked and created if necessary.")
 
+
 def is_group_configured(group_id: int) -> bool:
     """Проверка наличия группы в кэше настроенных групп."""
     return any(group["group_id"] == group_id for group in configured_groups_cache)
 
-async def add_configured_group(chat: Chat, update: Update):
+
+async def add_configured_group(update):
+    chat = update.effective_chat
     user = update.effective_user
     conn = None
     cursor = None
@@ -97,16 +102,23 @@ async def add_configured_group(chat: Chat, update: Update):
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO `groups` (group_id) VALUES (%s) ON DUPLICATE KEY UPDATE group_id=group_id",
-            (chat.id,)
+            (chat.id,),
         )
         cursor.execute(
             "INSERT INTO `group_settings` (group_id, parameter, value) VALUES (%s, %s, %s) "
             "ON DUPLICATE KEY UPDATE value=%s",
-            (chat.id, "instructions", INSTRUCTIONS_DEFAULT_TEXT, INSTRUCTIONS_DEFAULT_TEXT)
+            (
+                chat.id,
+                "instructions",
+                INSTRUCTIONS_DEFAULT_TEXT,
+                INSTRUCTIONS_DEFAULT_TEXT,
+            ),
         )
         conn.commit()
     except mysql.connector.Error as err:
-        logger.exception(f"Database error when configuring group {display_chat(chat)}: {err}")
+        logger.exception(
+            f"Database error when configuring group {display_chat(chat)}: {err}"
+        )
         await update.message.reply_text("Ошибка настройки бота для этой группы.")
     finally:
         if cursor:
@@ -116,14 +128,16 @@ async def add_configured_group(chat: Chat, update: Update):
 
     # Обновление кэша настроенных групп
     configured_groups_cache.append(
-        {"group_id": chat.id, "settings": {
-            "instructions": INSTRUCTIONS_DEFAULT_TEXT}}
+        {"group_id": chat.id, "settings": {"instructions": INSTRUCTIONS_DEFAULT_TEXT}}
     )
 
     await update.message.reply_text(
         "Бот настроен для этой группы. Используйте /help, чтобы увидеть доступные команды."
     )
-    logger.info(f"User {display_user(user)} configured group {display_chat(chat)}.")
+    logger.info(
+        f"User {display_user(user)} configured group {display_chat(chat)}"
+    )
+
 
 def load_configured_groups():
     """Загрузка настроенных групп из базы данных."""
@@ -185,14 +199,16 @@ def load_user_caches():
         cur = conn.cursor()
         # Спамеры
         cur.execute("SELECT DISTINCT user_id FROM user_entries WHERE spammer = TRUE")  # type: ignore[arg-type]
-        spammers_cache = _fetch_user_ids(cur)
+        spammers_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
         # Seen пользователи
         cur.execute("SELECT DISTINCT user_id FROM user_entries WHERE seen_message = TRUE")  # type: ignore[arg-type]
-        seen_users_cache = _fetch_user_ids(cur)
+        seen_users_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
         # Подозрительные: хотя бы одна запись без seen и без spammer
-        cur.execute("""SELECT DISTINCT user_id FROM user_entries 
-            WHERE seen_message = FALSE AND spammer = FALSE""")  # type: ignore[arg-type]
-        suspicious_users_cache = _fetch_user_ids(cur)
+        cur.execute(
+            """SELECT DISTINCT user_id FROM user_entries 
+            WHERE seen_message = FALSE AND spammer = FALSE"""
+        )  # type: ignore[arg-type]
+        suspicious_users_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
     except mysql.connector.Error as err:
         logger.critical(f"Database error while loading user caches: {err}.")
         raise SystemExit("Database error.")
@@ -208,6 +224,7 @@ def load_user_caches():
 
 
 # ===== New helper functions for new logic =====
+
 
 def user_has_spammer_anywhere(user_id: int) -> bool:
     """Проверка глобального статуса спамера с использованием кэша.
@@ -245,6 +262,7 @@ def user_has_spammer_anywhere(user_id: int) -> bool:
         if conn:
             conn.close()
 
+
 def user_has_seen_anywhere(user_id: int) -> bool:
     if user_id in seen_users_cache:
         return True
@@ -280,6 +298,7 @@ def user_has_seen_anywhere(user_id: int) -> bool:
         if conn:
             conn.close()
 
+
 def ensure_user_entry(user_id: int, group_id: int):
     conn = None
     cur = None
@@ -302,6 +321,7 @@ def ensure_user_entry(user_id: int, group_id: int):
             cur.close()
         if conn:
             conn.close()
+
 
 def mark_spammer_in_group(user_id: int, group_id: int):
     """Помечает пользователя спамером в группе + обновляет кэши."""
@@ -335,13 +355,21 @@ def mark_spammer_in_group(user_id: int, group_id: int):
     suspicious_users_cache.discard(user_id)
     return success
 
+
 def mark_seen_in_group(user_id: int, group_id: int):
     global seen_users_cache, not_seen_cache, suspicious_users_cache
     # Оптимистично обновляем кэши ДО обращения к БД, чтобы последующие чтения сразу видели статус.
     seen_users_cache.add(user_id)
     not_seen_cache.discard(user_id)
     suspicious_users_cache.discard(user_id)
-
+    # Дополнительное гарантированное обновление ссылки (на случай если где-то удерживается старая ссылка)
+    if user_id not in seen_users_cache:
+        # rebind (хотя теоретически не нужно, но оставляем как страховку)
+        tmp = set(seen_users_cache)
+        tmp.add(user_id)
+        seen_users_cache = tmp  # type: ignore
+    if user_id in not_seen_cache:
+        not_seen_cache = {x for x in not_seen_cache if x != user_id}  # type: ignore
     conn = None
     cur = None
     success = False
@@ -373,6 +401,7 @@ def mark_seen_in_group(user_id: int, group_id: int):
     user_has_seen_anywhere(user_id)
     return success
 
+
 def mark_unseen_in_group(user_id: int, group_id: int):
     """Создаёт / фиксирует запись со статусом unseen (используется при джойне). Добавляем в suspicious."""
     conn = None
@@ -400,6 +429,7 @@ def mark_unseen_in_group(user_id: int, group_id: int):
         if conn:
             conn.close()
 
+
 def clear_spammer_flag_in_group(user_id: int, group_id: int):
     conn = None
     cur = None
@@ -412,7 +442,9 @@ def clear_spammer_flag_in_group(user_id: int, group_id: int):
         )
         conn.commit()
     except mysql.connector.Error as err:
-        logger.exception(f"DB error clear_spammer_flag_in_group({user_id},{group_id}): {err}")
+        logger.exception(
+            f"DB error clear_spammer_flag_in_group({user_id},{group_id}): {err}"
+        )
     finally:
         if cur:
             cur.close()
@@ -427,6 +459,7 @@ def clear_spammer_flag_in_group(user_id: int, group_id: int):
     # Возможно вернуть в suspicious если остались unseen записи
     # (упрощённо не добавляем обратно здесь — это можно расширить при необходимости)
 
+
 def groups_where_spammer(user_id: int) -> List[int]:
     conn = None
     cur = None
@@ -438,7 +471,7 @@ def groups_where_spammer(user_id: int) -> List[int]:
             (user_id,),
         )
         rows = cur.fetchall()
-        return [int(row[0]) for row in rows if row[0] is not None]  # type: ignore[misc]
+        return [int(row[0]) for row in rows if row and row[0] is not None]  # type: ignore[misc]
     except mysql.connector.Error as err:
         logger.exception(f"DB error groups_where_spammer({user_id}): {err}")
         return []
@@ -447,6 +480,7 @@ def groups_where_spammer(user_id: int) -> List[int]:
             cur.close()
         if conn:
             conn.close()
+
 
 def user_is_spammer_in_group(user_id: int, group_id: int) -> bool:
     conn = None
@@ -460,13 +494,16 @@ def user_is_spammer_in_group(user_id: int, group_id: int) -> bool:
         )
         return cur.fetchone() is not None
     except mysql.connector.Error as err:
-        logger.exception(f"DB error user_is_spammer_in_group({user_id},{group_id}): {err}")
+        logger.exception(
+            f"DB error user_is_spammer_in_group({user_id},{group_id}): {err}"
+        )
         return False
     finally:
         if cur:
             cur.close()
         if conn:
             conn.close()
+
 
 def get_user_entry(user_id: int, group_id: int) -> Optional[Tuple[bool, bool]]:
     """Return tuple (seen_message, spammer) or None if no record."""
@@ -493,11 +530,14 @@ def get_user_entry(user_id: int, group_id: int) -> Optional[Tuple[bool, bool]]:
         if conn:
             conn.close()
 
+
 # =================== Repository Pattern (advanced abstraction) ===================
+
 
 class UserStateRepository:
     """Высокоуровневый слой для операций со статусами пользователей.
-    Все обновления должны идти через него (постепенная миграция), чтобы кэш оставался консистентным."""
+    Все обновления должны идти через него (постепенная миграция), чтобы кэш оставался консистентным.
+    """
 
     def is_spammer(self, user_id: int) -> bool:
         return user_has_spammer_anywhere(user_id)
@@ -530,6 +570,6 @@ class UserStateRepository:
 # Singleton instance (можно заменить фабрикой при DI)
 user_state_repo = UserStateRepository()
 
+
 def get_user_state_repo() -> UserStateRepository:
     return user_state_repo
-
