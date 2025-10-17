@@ -9,7 +9,9 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /workspace
 
 COPY requirements.txt .
+COPY .devcontainer/requirements.debug.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.debug.txt
 
 # Устанавливаем debugpy
 RUN pip install debugpy

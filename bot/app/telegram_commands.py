@@ -1,4 +1,4 @@
-from .logging_setup import logger, current_update_id
+from .logging_setup import logger, current_update_id, with_update_id
 from telegram import (
     Update,
 )
@@ -10,6 +10,8 @@ from .formatting import display_chat, display_user
 from .database import (
     is_group_configured,
     add_configured_group,
+    get_user_state_repo,
+    groups_where_spammer,
 )
 import mysql.connector
 from .config import *
@@ -22,9 +24,10 @@ except ImportError:
     SENTRY_AVAILABLE = False
 
 
+@with_update_id
 async def test_sentry_command(update: Update, context: CallbackContext) -> None:
     """Команда для тестирования Sentry интеграции (только для администраторов)."""
-    current_update_id.set(update.update_id)
+    # update_id set by decorator
     user = update.effective_user
 
     # Проверяем, что это администратор
@@ -67,9 +70,10 @@ async def test_sentry_command(update: Update, context: CallbackContext) -> None:
         logger.exception("Error during Sentry test")
 
 
+@with_update_id
 async def start_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /start."""
-    current_update_id.set(update.update_id)
+    # update_id set by decorator
     chat = update.effective_chat
     user = update.effective_user
     logger.debug(
@@ -121,18 +125,17 @@ async def start_command(update: Update, context: CallbackContext) -> None:
         return
 
     # Настройка группы
-    await add_configured_group(chat, update)
+    # Original helper expects 'update' object providing effective_chat/user, keep signature update first
+    await add_configured_group(update)
 
 
+@with_update_id
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Обработка команды /help."""
-    current_update_id.set(update.update_id)
+    # update_id set by decorator
     chat = update.effective_chat
     user = update.effective_user
-    logger.debug(
-        f"Handling /help command from user {display_user(user)} in chat {
-            display_chat(chat)}"
-    )
+    logger.debug(f"Handling /help command from user {display_user(user)} in chat {display_chat(chat)}")
 
     if chat.type == "private":
         await update.message.reply_text("Этот бот предназначен только для групп.")
@@ -142,7 +145,8 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         return
 
     chat_id = update.effective_chat.id
-
+        # Настройка группы: add_configured_group теперь принимает только объект update
+        # (он содержит effective_chat / effective_user), параметр chat больше не нужен.
     if is_group_configured(chat_id):
         await update.message.reply_text(
             "Доступные команды:\n"
@@ -159,3 +163,87 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         logger.debug(
             f"Help command received from user {display_user(user)} in unconfigured group {display_chat(chat)}."
         )
+
+@with_update_id
+async def user_command(update: Update, context: CallbackContext) -> None:
+    """Команда /user <id>: только в личке с админом; показывает состояние пользователя."""
+    user = update.effective_user
+    chat = update.effective_chat
+    if chat.type != 'private':
+        await update.message.reply_text("Эта команда доступна только в личке.")
+        logger.debug("/user invoked outside private chat")
+        return
+    if not ADMIN_TELEGRAM_ID or str(user.id) != str(ADMIN_TELEGRAM_ID):
+        await update.message.reply_text("Только администратор может использовать эту команду.")
+        logger.debug("/user invoked by non-admin in private chat")
+        return
+    args = (update.message.text or '').strip().split()
+    if len(args) < 2:
+        await update.message.reply_text("Использование: /user <telegram_id>")
+        return
+    try:
+        target_id = int(args[1])
+    except ValueError:
+        await update.message.reply_text("Неверный формат ID.")
+        return
+    repo = get_user_state_repo()
+    is_spammer = repo.is_spammer(target_id)
+    is_seen_any = repo.is_seen(target_id)
+    is_suspicious = repo.is_suspicious(target_id)
+    spam_groups = groups_where_spammer(target_id)
+    status_lines = [
+        f"User: {target_id}",
+        f"Spammer: {'YES' if is_spammer else 'NO'}", 
+        f"Seen anywhere: {'YES' if is_seen_any else 'NO'}",
+        f"Suspicious: {'YES' if is_suspicious else 'NO'}",
+        f"Spam groups: {', '.join(map(str, spam_groups)) if spam_groups else 'None'}"
+    ]
+    await update.message.reply_text("\n".join(status_lines))
+    logger.debug(f"Admin inspected user {target_id} via /user command")
+
+@with_update_id
+async def unban_command(update: Update, context: CallbackContext) -> None:
+    """Команда /unban <id>: глобальная очистка spam-флага (админ в личке)."""
+    user = update.effective_user
+    chat = update.effective_chat
+    if chat.type != 'private':
+        await update.message.reply_text("Эта команда доступна только в личке.")
+        logger.debug("/unban invoked outside private chat")
+        return
+    if not ADMIN_TELEGRAM_ID or str(user.id) != str(ADMIN_TELEGRAM_ID):
+        await update.message.reply_text("Только администратор может использовать эту команду.")
+        logger.debug("/unban invoked by non-admin in private chat")
+        return
+    args = (update.message.text or '').strip().split()
+    if len(args) < 2:
+        await update.message.reply_text("Использование: /unban <telegram_id>")
+        return
+    try:
+        target_id = int(args[1])
+    except ValueError:
+        await update.message.reply_text("Неверный формат ID.")
+        return
+    repo = get_user_state_repo()
+    spam_groups = groups_where_spammer(target_id)
+    if not spam_groups:
+        await update.message.reply_text("Пользователь не помечен как спамер.")
+        logger.debug(f"/unban on non-spammer {target_id}")
+        return
+    cleared = []
+    for gid in list(spam_groups):
+        try:
+            repo.clear_spammer(target_id, gid)
+            cleared.append(gid)
+        except Exception:
+            logger.exception(f"Failed to clear spammer flag for user {target_id} in group {gid}")
+    # After clearing, re-evaluate global spam cache
+    remaining = groups_where_spammer(target_id)
+    if not remaining:
+        from .database import spammers_cache, not_spammers_cache
+        if target_id in spammers_cache:
+            spammers_cache.discard(target_id)
+        not_spammers_cache.add(target_id)
+    await update.message.reply_text(f"Очищены флаги спама в группах: {', '.join(map(str, cleared)) if cleared else 'None'}")
+    from .logging_setup import log_event
+    log_event('admin_global_unban', target_user_id=target_id, cleared_groups=cleared)
+    logger.debug(f"/unban cleared spam flags for {target_id} in {cleared}")

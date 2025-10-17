@@ -2,6 +2,28 @@ import pytest
 from app import database
 import app.antispam as antispam
 
+# Lightweight async test support fallback (if pytest-asyncio not active)
+import asyncio, inspect, logging
+
+def pytest_pyfunc_call(pyfuncitem):  # type: ignore
+    """Run async test functions manually if no plugin handles them.
+    Filters fixture arguments to only those accepted by the test function signature.
+    """
+    if inspect.iscoroutinefunction(pyfuncitem.obj):
+        sig_params = set(inspect.signature(pyfuncitem.obj).parameters.keys())
+        filtered_args = {k: v for k, v in pyfuncitem.funcargs.items() if k in sig_params}
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.run_until_complete(pyfuncitem.obj(**filtered_args))
+        return True
+    return None
+
 @pytest.fixture(autouse=True)
 def global_env(monkeypatch):
     """Авто-фикстура: очищает кэши, настраивает дефолтные моки и предоставляет общий baseline.

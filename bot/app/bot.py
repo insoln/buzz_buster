@@ -18,8 +18,8 @@ except ImportError:
     SENTRYSdkAvailable = False
 from app.telegram_messages import handle_message
 from .telegram_groupmembership import handle_my_chat_members, handle_other_chat_members
-from .telegram_commands import help_command, start_command, test_sentry_command
-from .logging_setup import logger
+from .telegram_commands import help_command, start_command, test_sentry_command, user_command, unban_command
+from .logging_setup import logger, with_update_id
 from .formatting import display_chat, display_user
 from .database import (
     check_and_create_tables,
@@ -133,6 +133,8 @@ async def main():
     application.add_handler(CommandHandler("start", start_command), group=1)
     application.add_handler(CommandHandler("help", help_command), group=1)
     application.add_handler(CommandHandler("test_sentry", test_sentry_command), group=1)
+    application.add_handler(CommandHandler("user", user_command), group=1)
+    application.add_handler(CommandHandler("unban", unban_command), group=1)
 
     # Регистрация обработчиков сообщений
     application.add_handler(
@@ -156,26 +158,30 @@ async def main():
 
     # Регистрируем обработчик всех входящих событий для дебага
 
-    async def log_event(update: Update, context: CallbackContext) -> None:
-        # Standardize logging with display helpers when possible (guard missing attrs)
+    @with_update_id
+    async def raw_update_logger(update: Update, context: CallbackContext) -> None:
+        """Логируем ПОЛНЫЙ сырой апдейт в плейнтексте до любой обработки.
+        Используем repr + безопасный доступ к chat/user для дополнительных строк.
+        """
         try:
-            chat = getattr(update, "effective_chat", None)
-            user = getattr(update, "effective_user", None)
-            chat_repr = display_chat(chat) if chat else "<no-chat>"
-            user_repr = display_user(user) if user else "<no-user>"
-            update_id = getattr(update, "update_id", "n/a")
-            logger.debug(
-                f"Received event id={update_id} type={type(update).__name__} chat={chat_repr} user={user_repr}"
-            )
-        except Exception:
-            logger.debug("Received event (logging failed to format chat/user)")
+            update_id = getattr(update, 'update_id', 'n/a')
+            # raw repr / dict form
+            raw_repr = repr(update)
+            chat = getattr(update, 'effective_chat', None)
+            user = getattr(update, 'effective_user', None)
+            chat_display = display_chat(chat) if chat else '<no-chat>'
+            user_display = display_user(user) if user else '<no-user>'
+            logger.debug(f"RAW_UPDATE id={update_id} chat={chat_display} user={user_display} raw={raw_repr}")
+        except Exception as e:
+            logger.debug(f"RAW_UPDATE logging failed: {e}")
 
-    application.add_handler(MessageHandler(filters.ALL, log_event), group=0)
+    # group=0 -> выполняется самым ранним, до других обработчиков
+    application.add_handler(MessageHandler(filters.ALL, raw_update_logger), group=0)
 
     # Запускаем бота
     try:
         await application.initialize()
-        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)  # type: ignore[attr-defined]
         await application.start()
         logger.info("Bot started successfully and polling for updates")
 
@@ -185,7 +191,7 @@ async def main():
         except (KeyboardInterrupt, SystemExit, asyncio.exceptions.CancelledError):
             logger.debug("Termination signal received. Shutting down...")
         finally:
-            await application.updater.stop()
+            await application.updater.stop()  # type: ignore[attr-defined]
             await application.stop()
             await application.shutdown()
             logger.info("Bot stopped.")
