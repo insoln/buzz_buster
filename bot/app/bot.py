@@ -18,7 +18,7 @@ except ImportError:
     SENTRYSdkAvailable = False
 from app.telegram_messages import handle_message
 from .telegram_groupmembership import handle_my_chat_members, handle_other_chat_members
-from .telegram_commands import help_command, start_command, test_sentry_command, user_command, unban_command
+from .telegram_commands import help_command, start_command, test_sentry_command, user_command, unban_command, ban_command, diag_command
 from .logging_setup import logger, with_update_id
 from .formatting import display_chat, display_user
 from .database import (
@@ -135,6 +135,8 @@ async def main():
     application.add_handler(CommandHandler("test_sentry", test_sentry_command), group=1)
     application.add_handler(CommandHandler("user", user_command), group=1)
     application.add_handler(CommandHandler("unban", unban_command), group=1)
+    application.add_handler(CommandHandler("ban", ban_command), group=1)
+    application.add_handler(CommandHandler("diag", diag_command), group=1)
 
     # Регистрация обработчиков сообщений
     application.add_handler(
@@ -184,6 +186,24 @@ async def main():
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)  # type: ignore[attr-defined]
         await application.start()
         logger.info("Bot started successfully and polling for updates")
+        # Optional startup notification to admin/status chat, safely wrapped
+        target_chats = []
+        if ADMIN_TELEGRAM_ID:
+            try:
+                target_chats.append(int(ADMIN_TELEGRAM_ID))
+            except Exception:
+                logger.warning(f"Invalid ADMIN_TELEGRAM_ID value: {ADMIN_TELEGRAM_ID}")
+        if STATUSCHAT_TELEGRAM_ID:
+            try:
+                target_chats.append(int(STATUSCHAT_TELEGRAM_ID))
+            except Exception:
+                logger.warning(f"Invalid STATUSCHAT_TELEGRAM_ID value: {STATUSCHAT_TELEGRAM_ID}")
+        for chat_id in target_chats:
+            try:
+                await application.bot.send_message(chat_id=chat_id, text="Bot startup OK")
+            except Exception as e:
+                # Avoid noisy stack traces for typical missing chat errors
+                logger.info(f"Startup notification skipped for chat {chat_id}: {e}")
 
         try:
             # Run the bot until a termination signal is received

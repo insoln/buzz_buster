@@ -103,7 +103,7 @@ ESSENTIAL_ACTIONS = {
     'ban_global_spammer', 'first_message_spam', 'first_message_ham',
     'new_user_spam', 'new_user_ham', 'late_suspicious_spam', 'late_suspicious_ham',
     'unban_clear_spammer', 'join_ban_known_spammer', 'cas_ban',
-    'inherit_trust', 'late_seen_upgrade', 'admin_global_unban'
+    'inherit_trust', 'late_seen_upgrade', 'admin_global_unban', 'admin_force_ban'
 }
 
 # Actions considered low-value (noise) will always be DEBUG (explicit list optional; fallback is debug anyway)
@@ -124,6 +124,14 @@ def _human_summary(action: str, payload: dict) -> str:
     chat = payload.get('chat_display') or f"chat={payload.get('chat_id')}"
     if action in {'ban_global_spammer','join_ban_known_spammer','cas_ban'}:
         return f"Banned spammer {user} in {chat}."
+    if action == 'admin_force_ban':
+        ban_success = payload.get('ban_success')
+        ban_error = payload.get('ban_error')
+        if ban_success:
+            return f"Admin forcibly marked & banned user={payload.get('target_user_id')} in chat={payload.get('target_group_id')}"
+        if ban_error:
+            return f"Admin forcibly marked user={payload.get('target_user_id')} SPAM in chat={payload.get('target_group_id')} (ban failed: {ban_error})"
+        return f"Admin forcibly marked user={payload.get('target_user_id')} SPAM in chat={payload.get('target_group_id')}"
     if action in {'first_message_spam','new_user_spam','late_suspicious_spam'}:
         return f"Classified {user} as SPAM in {chat} (first message path)."
     if action in {'first_message_ham','new_user_ham','late_suspicious_ham','inherit_trust','late_seen_upgrade'}:

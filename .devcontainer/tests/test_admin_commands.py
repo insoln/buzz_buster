@@ -74,3 +74,6 @@ async def test_unban_command_global(monkeypatch, caplog):
     from app.database import groups_where_spammer
     remaining = groups_where_spammer(target_id)
     assert not remaining, 'Spam flags not fully cleared'
+    # Seen flag should be set after global unban in at least one cleared group
+    repo2 = get_user_state_repo()
+    assert repo2.is_seen(target_id), 'Seen flag not set after global unban'

@@ -29,9 +29,19 @@ def get_db_connection():
 def check_and_create_tables():
     conn = None
     cursor = None  # predeclare for finally safety
+    initial_count = None
+    final_count = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Capture initial row count for summary later (ignore failures silently)
+        try:
+            cursor.execute("SELECT COUNT(*) FROM user_entries")
+            row = cursor.fetchone()
+            if row:
+                initial_count = int(row[0])  # type: ignore[index]
+        except Exception:
+            initial_count = None
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS `groups` (
@@ -69,6 +79,157 @@ def check_and_create_tables():
             """
         )
         conn.commit()
+
+        # ===== Post-creation hardening: ensure required indexes exist even if table pre-existed without them =====
+        def _existing_indexes(table: str):
+            c2 = conn.cursor()
+            try:
+                c2.execute(f"SHOW INDEX FROM {table}")
+                names = set()
+                for raw in c2.fetchall():
+                    # Treat raw as tuple for positional access (SHOW INDEX format)
+                    try:
+                        row: tuple = raw  # type: ignore[assignment]
+                        if len(row) >= 3 and row[2]:
+                            names.add(str(row[2]))
+                    except Exception:
+                        continue
+                return names
+            except mysql.connector.Error as e:  # type: ignore[name-defined]
+                logger.warning(f"Cannot list indexes for {table}: {e}")
+                return set()
+            finally:
+                c2.close()
+
+        # user_entries required indexes
+        required_user_entries_indexes = [
+            ("uniq_user_group", "UNIQUE KEY uniq_user_group (user_id, group_id)", True),
+            ("idx_user", "KEY idx_user (user_id)", False),
+            ("idx_group", "KEY idx_group (group_id)", False),
+            ("idx_spammer", "KEY idx_spammer (spammer)", False),
+            ("idx_seen", "KEY idx_seen (seen_message)", False),
+        ]
+
+        existing = _existing_indexes("user_entries")
+        # Detect duplicates before trying to add unique key if missing
+        if "uniq_user_group" not in existing:
+            dup_cursor = conn.cursor()
+            try:
+                # First detect existence of duplicates (full, not limited) for decision
+                dup_cursor.execute(
+                    "SELECT COUNT(*) FROM (SELECT user_id, group_id FROM user_entries GROUP BY user_id, group_id HAVING COUNT(*)>1) x"
+                )
+                total_duplicate_pairs_row = dup_cursor.fetchone()
+                total_duplicate_pairs = int(total_duplicate_pairs_row[0]) if total_duplicate_pairs_row else 0  # type: ignore[index]
+                if total_duplicate_pairs > 0:
+                    # Sample for logging
+                    dup_cursor.execute(
+                        "SELECT user_id, group_id, COUNT(*) c FROM user_entries GROUP BY user_id, group_id HAVING c>1 LIMIT 5"
+                    )
+                    sample_rows = dup_cursor.fetchall()
+                    sample_fmt = []
+                    for r in sample_rows:
+                        try:
+                            user_id, group_id, cnt = r  # type: ignore[misc]
+                            sample_fmt.append(f"(user_id={user_id}, group_id={group_id}, cnt={cnt})")
+                        except Exception:
+                            sample_fmt.append(str(r))
+                    logger.warning(
+                        f"Found {total_duplicate_pairs} duplicate (user_id,group_id) pairs in user_entries. Beginning deduplication. Sample: "
+                        + ", ".join(sample_fmt)
+                    )
+                    # Consolidate flags (OR logic) into latest (MAX id) row per pair
+                    try:
+                        cursor.execute(
+                            """
+                            UPDATE user_entries u
+                            JOIN (
+                              SELECT MAX(id) AS keep_id, user_id, group_id,
+                                     MAX(join_date) AS max_join_date,
+                                     MAX(seen_message) AS seen_any,
+                                     MAX(spammer) AS spammer_any
+                              FROM user_entries
+                              GROUP BY user_id, group_id
+                              HAVING COUNT(*)>1
+                            ) agg ON u.id = agg.keep_id
+                            SET u.join_date = agg.max_join_date,
+                                u.seen_message = agg.seen_any,
+                                u.spammer = agg.spammer_any
+                            """
+                        )
+                        logger.info("Canonical rows updated with aggregated flags")
+                    except mysql.connector.Error as e:  # type: ignore[name-defined]
+                        logger.exception(f"Failed to consolidate duplicate rows before deletion: {e}")
+
+                    # Delete all non-canonical duplicates (keep MAX(id))
+                    try:
+                        cursor.execute(
+                            """
+                            DELETE ue FROM user_entries ue
+                            JOIN (
+                              SELECT MAX(id) AS keep_id, user_id, group_id
+                              FROM user_entries
+                              GROUP BY user_id, group_id
+                              HAVING COUNT(*)>1
+                            ) d ON ue.user_id=d.user_id AND ue.group_id=d.group_id AND ue.id<>d.keep_id
+                            """
+                        )
+                        removed = cursor.rowcount
+                        logger.info(f"Removed {removed} duplicate rows from user_entries.")
+                    except mysql.connector.Error as e:  # type: ignore[name-defined]
+                        logger.exception(f"Failed deleting duplicate rows: {e}")
+                    # Re-check duplicates
+                    recheck_cursor = conn.cursor()
+                    try:
+                        recheck_cursor.execute(
+                            "SELECT COUNT(*) FROM (SELECT user_id, group_id FROM user_entries GROUP BY user_id, group_id HAVING COUNT(*)>1) x"
+                        )
+                        rc_row = recheck_cursor.fetchone()
+                        still = int(rc_row[0]) if rc_row else 0  # type: ignore[index]
+                        if still == 0:
+                            logger.info("Deduplication complete; proceeding to add unique index uniq_user_group.")
+                            try:
+                                cursor.execute("ALTER TABLE user_entries ADD UNIQUE KEY uniq_user_group (user_id, group_id)")
+                                logger.info("Added missing unique index uniq_user_group on user_entries.")
+                            except mysql.connector.Error as e:  # type: ignore[name-defined]
+                                logger.exception(f"Failed adding unique index uniq_user_group after deduplication: {e}")
+                        else:
+                            logger.critical(
+                                f"Deduplication attempted but {still} duplicate pairs remain; UNIQUE index not added. Manual intervention required."
+                            )
+                    finally:
+                        recheck_cursor.close()
+                else:
+                    # No duplicates -> safe to add unique index immediately
+                    try:
+                        cursor.execute("ALTER TABLE user_entries ADD UNIQUE KEY uniq_user_group (user_id, group_id)")
+                        logger.info("Added missing unique index uniq_user_group on user_entries.")
+                    except mysql.connector.Error as e:  # type: ignore[name-defined]
+                        logger.exception(f"Failed adding unique index uniq_user_group: {e}")
+            finally:
+                dup_cursor.close()
+            # Refresh existing set after potential addition
+            existing = _existing_indexes("user_entries")
+
+        # Add any missing non-unique indexes
+        for name, ddl_fragment, is_unique in required_user_entries_indexes:
+            if name == "uniq_user_group":
+                continue  # handled above
+            if name not in existing:
+                try:
+                    cursor.execute(f"ALTER TABLE user_entries ADD {ddl_fragment}")
+                    logger.info(f"Added missing index {name} on user_entries.")
+                except mysql.connector.Error as e:  # type: ignore[name-defined]
+                    logger.exception(f"Failed adding index {name} on user_entries: {e}")
+
+        # Ensure group_settings unique composite exists (if table pre-existed without it)
+        gs_indexes = _existing_indexes("group_settings")
+        if "unique_group_parameter" not in gs_indexes:
+            try:
+                cursor.execute("ALTER TABLE group_settings ADD UNIQUE KEY unique_group_parameter (group_id, parameter)")
+                logger.info("Added missing unique index unique_group_parameter on group_settings.")
+            except mysql.connector.Error as e:  # type: ignore[name-defined]
+                logger.exception(f"Failed adding unique_group_parameter index: {e}")
     except mysql.connector.Error as err:
         logger.critical(f"Database error while checking and creating tables: {err}.")
         raise SystemExit("Database error.")
@@ -77,7 +238,21 @@ def check_and_create_tables():
             cursor.close()
         if conn:
             conn.close()
-    logger.debug("Tables checked and created if necessary.")
+        # Summary log: final counts & dedup stats
+        try:
+            if cursor:
+                cursor.execute("SELECT COUNT(*) FROM user_entries")
+                fr = cursor.fetchone()
+                if fr:
+                    final_count = int(fr[0])  # type: ignore[index]
+        except Exception:
+            final_count = None
+        try:
+            from .logging_setup import log_event
+            log_event('schema_harden_summary', initial_rows=initial_count, final_rows=final_count)
+        except Exception:
+            pass
+        logger.debug("Tables checked and created if necessary.")
 
 def is_group_configured(group_id: int) -> bool:
     """Проверка наличия группы в кэше настроенных групп."""
@@ -306,8 +481,12 @@ def mark_spammer_in_group(user_id: int, group_id: int):
     cur = None
     success = False
     try:
+        from .logging_setup import log_event
+        log_event('db_mark_spammer_attempt', user_id=user_id, chat_id=group_id)
         conn = get_db_connection()
+        log_event('db_mark_spammer_connected', user_id=user_id, chat_id=group_id, host=DB_CONFIG.get('host'), db=DB_CONFIG.get('database'), user=DB_CONFIG.get('user'))
         cur = conn.cursor()
+        log_event('db_mark_spammer_executing', user_id=user_id, chat_id=group_id)
         cur.execute(
             """
             INSERT INTO user_entries (user_id, group_id, join_date, spammer)
@@ -316,10 +495,17 @@ def mark_spammer_in_group(user_id: int, group_id: int):
             """,
             (user_id, group_id),
         )
+        log_event('db_mark_spammer_before_commit', user_id=user_id, chat_id=group_id)
         conn.commit()
         success = True
+        log_event('db_mark_spammer_success', user_id=user_id, chat_id=group_id)
     except mysql.connector.Error as err:
         logger.exception(f"DB error mark_spammer_in_group({user_id},{group_id}): {err}")
+        try:
+            from .logging_setup import log_event
+            log_event('db_mark_spammer_failed', user_id=user_id, chat_id=group_id, error=str(err), host=DB_CONFIG.get('host'), db=DB_CONFIG.get('database'), user=DB_CONFIG.get('user'))
+        except Exception:
+            pass
     finally:
         if cur:
             cur.close()
@@ -429,6 +615,7 @@ def clear_spammer_flag_in_group(user_id: int, group_id: int):
             not_spammers_cache.add(user_id)
     # Возможно вернуть в suspicious если остались unseen записи
     # (упрощённо не добавляем обратно здесь — это можно расширить при необходимости)
+    logger.info(f"Cleared spammer flag for user {user_id} in group {group_id}.")
 
 def groups_where_spammer(user_id: int) -> List[int]:
     conn = None
@@ -512,7 +699,7 @@ class UserStateRepository:
         return (user_id in suspicious_users_cache) and (user_id not in spammers_cache)
 
     def mark_spammer(self, user_id: int, group_id: int):
-        mark_spammer_in_group(user_id, group_id)
+        return mark_spammer_in_group(user_id, group_id)
 
     def mark_seen(self, user_id: int, group_id: int):
         mark_seen_in_group(user_id, group_id)
@@ -528,6 +715,13 @@ class UserStateRepository:
 
     def entry(self, user_id: int, group_id: int):
         return get_user_entry(user_id, group_id)
+
+    def is_spammer_in_group(self, user_id: int, group_id: int) -> bool:
+        """Precise per-group spammer flag check (DB-backed). Falls back to cache heuristic if DB inaccessible."""
+        try:
+            return user_is_spammer_in_group(user_id, group_id)
+        except Exception:
+            return (user_id in spammers_cache)
 
 
 # Singleton instance (можно заменить фабрикой при DI)

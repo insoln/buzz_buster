@@ -133,16 +133,24 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
         prev_status = str(getattr(old_member, 'status', '')).lower()
         new_status = str(getattr(member, 'status', '')).lower()
         # Treat 'kicked' (telegram lib may map to left) as banned-like for unban flow.
-        if prev_status in ("banned", "restricted", "kicked") and new_status == "member":
+        if prev_status in ("banned", "restricted", "kicked") and new_status in ("member", "left"):
             # Attempt to clear local/global spammer status.
-            entry = repo.entry(member.user.id, chat.id)
-            spammer_flag = False
+            uid = member.user.id
+            # Robust determination BEFORE any clearing attempts.
+            local_spam = False
+            entry = repo.entry(uid, chat.id)
             if entry:
-                _, spammer_entry_flag = entry
-                spammer_flag = bool(spammer_entry_flag) or (member.user.id in spammers_cache)
+                _, spam_flag = entry
+                local_spam = bool(spam_flag)
             else:
-                # No DB entry (e.g., test / offline DB). Fall back to cache heuristic.
-                spammer_flag = member.user.id in spammers_cache
+                # Fallback: direct DB per-group check (may create implicit entry) or cache heuristic
+                try:
+                    local_spam = repo.is_spammer_in_group(uid, chat.id)
+                except Exception:
+                    local_spam = uid in spammers_cache
+            global_spam_cache = uid in spammers_cache
+            # Consider user spammer if flagged locally OR globally (in any group)
+            spammer_flag = local_spam or global_spam_cache
             if spammer_flag:
                 # Всегда пытаемся очистить локальный флаг и пересчитать остальные группы.
                 other_groups = []
@@ -162,11 +170,31 @@ async def handle_other_chat_members(update: Update, context: CallbackContext) ->
                 # Если больше нигде не числится, убираем из глобального кэша
                 if not other_groups and member.user.id in spammers_cache:
                     spammers_cache.discard(member.user.id)
-                msg = "Reputation in this group restored."
+                def _escape_html(text: str) -> str:
+                    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                first = getattr(member.user, 'first_name', '') or ''
+                last = getattr(member.user, 'last_name', '') or ''
+                base_name = (first + (' ' + last if last else '')).strip() or 'user'
+                base_name = _escape_html(base_name)
+                mention = f"<a href=\"tg://user?id={member.user.id}\">{base_name}</a>"
+                # Более человечное публичное сообщение, адресованное лично пользователю
                 if other_groups:
-                    msg += f" Still flagged in groups: {', '.join(map(str, other_groups))}. Unban there to fully clear reputation."
+                    msg = (
+                        f"{mention}, мы восстановили твою репутацию в этой группе. Извини за ошибочный бан. "
+                        f"Ты всё ещё помечен спамером в {len(other_groups)} других группах — напиши мне в личку, разберёмся."
+                    )
+                else:
+                    msg = (
+                        f"{mention}, мы восстановили твою репутацию в этой группе. Извини за ошибочный бан. "
+                        "Ты больше нигде не числишься спамером. Приятного общения!"
+                    )
                 try:
-                    await context.bot.send_message(chat.id, msg)
+                    await context.bot.send_message(chat.id, msg, parse_mode="HTML")
+                except Exception:
+                    pass
+                # Mark user as seen after unban (восстановлен репутационный доверенный статус)
+                try:
+                    repo.mark_seen(member.user.id, chat.id)
                 except Exception:
                     pass
                 log_event("unban_clear_spammer", user_id=member.user.id, chat_id=chat.id, user=member.user, chat=chat, other_groups=other_groups)
