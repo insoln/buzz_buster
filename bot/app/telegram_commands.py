@@ -451,8 +451,8 @@ async def ban_command(update: Update, context: CallbackContext) -> None:
             await message.reply_text(
                 "Эта группа не настроена или неизвестна. Сначала выполните /start в нужной группе."
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception(f"Failed to send group not configured message in /ban: {e}")
         logger.debug(f"/ban refused for group {target_group_id}: group not configured")
         return
     from .database import get_user_state_repo
