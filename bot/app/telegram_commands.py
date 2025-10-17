@@ -579,7 +579,7 @@ async def diag_command(update: Update, context: CallbackContext) -> None:
     try:
         await message.reply_text("\n".join(lines))
     except Exception as e:
-        logger.exception("Failed to send diag message")
+        logger.exception(f"Failed to send diag message: {e}")
     from .logging_setup import log_event
     log_event('admin_diag', target_user_id=target_user_id, target_group_id=target_group_id,
               db_connect=db_ok, entry=entry, spam_groups=spam_groups,
