@@ -22,6 +22,10 @@ not_seen_cache = set()      # user_ids для которых подтвержд�
 debug_counter_spammer_queries = 0
 debug_counter_seen_queries = 0
 
+def _fetch_user_ids(cursor) -> set[int]:
+    """Helper function to convert cursor results to a set of user IDs."""
+    return {int(uid) for (uid,) in cursor.fetchall() if uid is not None}
+
 def get_db_connection():
     """Return a new DB connection."""
     return mysql.connector.connect(**DB_CONFIG)
@@ -181,14 +185,14 @@ def load_user_caches():
         cur = conn.cursor()
         # Спамеры
         cur.execute("SELECT DISTINCT user_id FROM user_entries WHERE spammer = TRUE")  # type: ignore[arg-type]
-        spammers_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
+        spammers_cache = _fetch_user_ids(cur)
         # Seen пользователи
         cur.execute("SELECT DISTINCT user_id FROM user_entries WHERE seen_message = TRUE")  # type: ignore[arg-type]
-        seen_users_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
+        seen_users_cache = _fetch_user_ids(cur)
         # Подозрительные: хотя бы одна запись без seen и без spammer
         cur.execute("""SELECT DISTINCT user_id FROM user_entries 
             WHERE seen_message = FALSE AND spammer = FALSE""")  # type: ignore[arg-type]
-        suspicious_users_cache = {int(uid) for (uid,) in cur.fetchall() if uid is not None}  # type: ignore[misc]
+        suspicious_users_cache = _fetch_user_ids(cur)
     except mysql.connector.Error as err:
         logger.critical(f"Database error while loading user caches: {err}.")
         raise SystemExit("Database error.")
@@ -434,7 +438,7 @@ def groups_where_spammer(user_id: int) -> List[int]:
             (user_id,),
         )
         rows = cur.fetchall()
-        return [int(row[0]) for row in rows if row and row[0] is not None]  # type: ignore[misc]
+        return [int(row[0]) for row in rows if row[0] is not None]  # type: ignore[misc]
     except mysql.connector.Error as err:
         logger.exception(f"DB error groups_where_spammer({user_id}): {err}")
         return []

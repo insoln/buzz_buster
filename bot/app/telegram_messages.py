@@ -3,6 +3,8 @@ from .antispam import check_openai_spam
 
 from telegram import (
     Update,
+    User,
+    Chat,
 )
 
 from telegram.ext import (
@@ -19,7 +21,7 @@ import mysql.connector
 from .config import *
 
 # Вспомогательная функция для проверки спама
-async def process_spam(update: Update, context: CallbackContext, user, chat) -> bool:
+async def process_spam(update: Update, context: CallbackContext, user: User, chat: Chat) -> bool:
     is_spam = False
     # Проверка пересланного сообщения
     msg = update.message
@@ -79,8 +81,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     # 2. Состояние в текущей группе
     entry = get_user_entry(user.id, chat.id)  # (seen, spammer) or None
-    current_seen = entry[0] if entry else None
-    current_spammer = entry[1] if entry else None
+    current_seen, current_spammer = entry if entry else (None, None)
 
     # 3. Если пользователь в общем suspicious списке -> проверить
     if repo.is_suspicious(user.id):

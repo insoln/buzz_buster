@@ -19,7 +19,7 @@ async def check_cas_ban(user_id: int) -> bool:
         logger.exception(f"Error checking CAS for user_id {user_id}: {e}")
         return False
     
-async def check_lols_ban(user_id: int) -> dict:
+async def check_lols_ban(user_id: int) -> bool:
     """Проверка пользователя по базе lols.bot."""
     url = f"https://lols.bot/account?id={user_id}"
     try:
@@ -29,7 +29,7 @@ async def check_lols_ban(user_id: int) -> dict:
                 return data.get("ok", False)
     except Exception as e:
         logger.exception(f"Error checking lols.bot for user_id {user_id}: {e}")
-        return {}
+        return False
 
 
 async def check_openai_spam(message, instructions) -> bool:
