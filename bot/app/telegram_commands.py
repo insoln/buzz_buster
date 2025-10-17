@@ -484,8 +484,8 @@ async def ban_command(update: Update, context: CallbackContext) -> None:
                 + ("Забанен." if ban_success else "(не удалось забанить)")
                 + " [" + ", ".join(status_bits) + "]"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Failed to send reply in /ban command: {exc}", exc_info=True)
         from .logging_setup import log_event
         log_event(
             'admin_force_ban',
