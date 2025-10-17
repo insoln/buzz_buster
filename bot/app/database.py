@@ -212,7 +212,7 @@ def check_and_create_tables():
             existing = _existing_indexes("user_entries")
 
         # Add any missing non-unique indexes
-        for name, ddl_fragment, is_unique in required_user_entries_indexes:
+        for name, ddl_fragment, _is_unique in required_user_entries_indexes:
             if name == "uniq_user_group":
                 continue  # handled above
             if name not in existing:
@@ -234,19 +234,34 @@ def check_and_create_tables():
         logger.critical(f"Database error while checking and creating tables: {err}.")
         raise SystemExit("Database error.")
     finally:
-        if cursor:
-            cursor.close()
+        # Capture final row count BEFORE closing cursor/connection (open new lightweight cursor if needed)
         if conn:
-            conn.close()
-        # Summary log: final counts & dedup stats
-        try:
-            if cursor:
-                cursor.execute("SELECT COUNT(*) FROM user_entries")
-                fr = cursor.fetchone()
+            c_final = None
+            try:
+                c_final = conn.cursor()
+                c_final.execute("SELECT COUNT(*) FROM user_entries")
+                fr = c_final.fetchone()
                 if fr:
                     final_count = int(fr[0])  # type: ignore[index]
-        except Exception:
-            final_count = None
+            except Exception:
+                final_count = None
+            finally:
+                if c_final is not None:
+                    try:
+                        c_final.close()
+                    except Exception:
+                        pass
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        # Summary log: final counts & dedup stats
         try:
             from .logging_setup import log_event
             log_event('schema_harden_summary', initial_rows=initial_count, final_rows=final_count)
@@ -517,7 +532,7 @@ def mark_spammer_in_group(user_id: int, group_id: int):
     suspicious_users_cache.discard(user_id)
     return success
 
-def mark_seen_in_group(user_id: int, group_id: int):
+def mark_seen_in_group(user_id: int, group_id: int) -> bool:
     global seen_users_cache, not_seen_cache, suspicious_users_cache
     # Оптимистично обновляем кэши ДО обращения к БД, чтобы последующие чтения сразу видели статус.
     seen_users_cache.add(user_id)
@@ -562,10 +577,12 @@ def mark_seen_in_group(user_id: int, group_id: int):
     user_has_seen_anywhere(user_id)
     return success
 
-def mark_unseen_in_group(user_id: int, group_id: int):
-    """Создаёт / фиксирует запись со статусом unseen (используется при джойне). Добавляем в suspicious."""
+def mark_unseen_in_group(user_id: int, group_id: int) -> bool:
+    """Создаёт / фиксирует запись со статусом unseen (используется при джойне). Добавляем в suspicious.
+    Возвращает bool успех операции записи в БД."""
     conn = None
     cur = None
+    success = False
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -578,6 +595,7 @@ def mark_unseen_in_group(user_id: int, group_id: int):
             (user_id, group_id),
         )
         conn.commit()
+        success = True
         # Добавляем в suspicious если не спамер
         if user_id not in spammers_cache:
             suspicious_users_cache.add(user_id)
@@ -588,10 +606,12 @@ def mark_unseen_in_group(user_id: int, group_id: int):
             cur.close()
         if conn:
             conn.close()
+    return success
 
-def clear_spammer_flag_in_group(user_id: int, group_id: int):
+def clear_spammer_flag_in_group(user_id: int, group_id: int) -> bool:
     conn = None
     cur = None
+    success = False
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -600,6 +620,7 @@ def clear_spammer_flag_in_group(user_id: int, group_id: int):
             (user_id, group_id),
         )
         conn.commit()
+        success = True
     except mysql.connector.Error as err:
         logger.exception(f"DB error clear_spammer_flag_in_group({user_id},{group_id}): {err}")
     finally:
@@ -616,6 +637,7 @@ def clear_spammer_flag_in_group(user_id: int, group_id: int):
     # Возможно вернуть в suspicious если остались unseen записи
     # (упрощённо не добавляем обратно здесь — это можно расширить при необходимости)
     logger.info(f"Cleared spammer flag for user {user_id} in group {group_id}.")
+    return success
 
 def groups_where_spammer(user_id: int) -> List[int]:
     conn = None
@@ -698,17 +720,17 @@ class UserStateRepository:
     def is_suspicious(self, user_id: int) -> bool:
         return (user_id in suspicious_users_cache) and (user_id not in spammers_cache)
 
-    def mark_spammer(self, user_id: int, group_id: int):
+    def mark_spammer(self, user_id: int, group_id: int) -> bool:
         return mark_spammer_in_group(user_id, group_id)
 
-    def mark_seen(self, user_id: int, group_id: int):
-        mark_seen_in_group(user_id, group_id)
+    def mark_seen(self, user_id: int, group_id: int) -> bool:
+        return mark_seen_in_group(user_id, group_id)
 
-    def mark_unseen(self, user_id: int, group_id: int):
-        mark_unseen_in_group(user_id, group_id)
+    def mark_unseen(self, user_id: int, group_id: int) -> bool:
+        return mark_unseen_in_group(user_id, group_id)
 
-    def clear_spammer(self, user_id: int, group_id: int):
-        clear_spammer_flag_in_group(user_id, group_id)
+    def clear_spammer(self, user_id: int, group_id: int) -> bool:
+        return clear_spammer_flag_in_group(user_id, group_id)
 
     def groups_with_spam_flag(self, user_id: int):
         return groups_where_spammer(user_id)
