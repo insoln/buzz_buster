@@ -119,6 +119,7 @@ NOISY_ACTIONS = {
     'bot_added_group', 'bot_no_admin_rights', 'bot_promoted_admin', 'bot_promoted_no_send_rights',
     'bot_removed', 'bot_removed_confirm', 'bot_removed_not_configured', 'channel_configured',
     'channel_config_error', 'group_removed_db', 'group_remove_error', 'bot_added_by_non_admin',
+    'extended_spam_detected',
     'check_member_status_error', 'chat_member_update', 'user_left', 'unhandled_path'
 }
 
@@ -152,6 +153,8 @@ def _human_summary(action: str, payload: dict) -> str:
         return f"Channel {chat} configured."
     if action == 'channel_config_error':
         return f"Channel {chat} configuration error: {payload.get('error')}"
+    if action == 'extended_spam_detected':
+        return f"Extended spam criteria triggered for user {user} in chat {chat}"
     if action == 'group_remove_error':
         return f"Group removal DB error for {chat}: {payload.get('error')}"
     if action == 'group_removed_db':
