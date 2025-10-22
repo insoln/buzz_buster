@@ -1,5 +1,6 @@
 from .logging_setup import logger, current_update_id, log_event, with_update_id
 from .antispam import check_openai_spam
+from .extended_spam_detection import check_extended_spam_criteria
 
 from telegram import (
     Update,
@@ -40,6 +41,16 @@ async def process_spam(update: Update, context: CallbackContext, user, chat) -> 
         # Обычное пересланное сообщение (manual forward) помечаем как спам
         if msg.forward_origin:
             is_spam = True
+    
+    # Extended spam detection (if enabled and not already flagged as spam)
+    if not is_spam and EXTENDED_SPAM_DETECTION_ENABLED:
+        try:
+            is_spam = await check_extended_spam_criteria(user, msg, context)
+            if is_spam:
+                log_event('extended_spam_detected', user_id=user.id, chat_id=chat.id, user=user, chat=chat)
+        except Exception as e:
+            logger.exception(f"Error in extended spam detection for user {display_user(user)}: {e}")
+    
     # Проверка через OpenAI
     if not is_spam:
         try:

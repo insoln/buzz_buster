@@ -30,3 +30,9 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST", "db"),
     "database": os.getenv("DB_NAME"),
 }
+
+# Extended spam detection configuration
+EXTENDED_SPAM_DETECTION_ENABLED = os.getenv("EXTENDED_SPAM_DETECTION_ENABLED", "true").lower() == "true"
+EXTENDED_PREMIUM_CHANNEL_CHECK_ENABLED = os.getenv("EXTENDED_PREMIUM_CHANNEL_CHECK_ENABLED", "false").lower() == "true"
+EXTENDED_BIO_INVITE_CHECK_ENABLED = os.getenv("EXTENDED_BIO_INVITE_CHECK_ENABLED", "true").lower() == "true"  
+EXTENDED_CHANNEL_MESSAGE_CHECK_ENABLED = os.getenv("EXTENDED_CHANNEL_MESSAGE_CHECK_ENABLED", "true").lower() == "true"
